@@ -677,6 +677,7 @@ class Player:
         self.combo = self.combo_t = self.swings = 0
         self.finisher = False
         self.swing_arc = 0.0
+        self.swing_hit = set()
         self.charge_t = self.blades_t = 0
         self.blade_cd = {}
         self.walk = 0.0
@@ -932,16 +933,33 @@ class Game:
         if finisher:
             p.combo = 0
         p.finisher = finisher
-        rng, arc = m['range'] * p.reach, m['arc'] * (1.35 if finisher else 1)
-        p.swing_arc = arc
+        p.swing_arc = m['arc'] * (1.35 if finisher else 1)
+        p.swing_hit = set()
         c, s = math.cos(p.aim), math.sin(p.aim)
         lunge = m['lunge'] * (1.6 if finisher else 1)
         p.wkx += c * lunge
         p.wky += s * lunge
+        if self.perk('warhammer'):
+            self.waves.append([p.x + c * 14, p.y + s * 14, 4, 42, 3 * p.mdmg, False, set(), 2, False])
+            self.sfx.play('slam')
+        if self.perk('daggers') and p.swings % 2 == 0:
+            self.bullets.append(Bullet(p.x + c * 4, p.y + s * 4, p.aim, 6.5, 3 * p.mdmg,
+                                       'dagger', False, 70, 2))
+        if not self.swing_hits():
+            self.sfx.play('swing')
+
+    def swing_hits(self):
+        """Resolve the current swing from the knight's current position. Called on the frame
+        of the swing and on each following active frame, so enemies (and bolts) that step into
+        the arc while it is still on screen are hit too; each enemy at most once per swing."""
+        p = self.player
+        m = MELEE[p.melee]
+        rng, arc = m['range'] * p.reach, p.swing_arc
+        c, s = math.cos(p.swing_aim), math.sin(p.swing_aim)
         hit = False
         self.striking = True
         for e in self.enemies:
-            if e.dead or e.hidden:
+            if e.dead or e.hidden or e.id in p.swing_hit:
                 continue
             dx, dy = e.x - p.x, e.y - p.y
             d = math.hypot(dx, dy)
@@ -949,9 +967,10 @@ class Game:
                 continue
             # the enemy's whole body counts, not just its centre
             half = arc / 2 + math.asin(min(1.0, e.r / max(d, 0.01)))
-            if (abs(angdiff(math.atan2(dy, dx), p.aim)) <= half or d < e.r + p.r + 3) \
+            if (abs(angdiff(math.atan2(dy, dx), p.swing_aim)) <= half or d < e.r + p.r + 3) \
                     and self.reachable(e.x, e.y, e.r):
-                dmg = m['dmg'] * p.mdmg * (2 if finisher else 1)
+                p.swing_hit.add(e.id)
+                dmg = m['dmg'] * p.mdmg * (2 if p.finisher else 1)
                 if self.perk('spear') and d > rng * 0.6:
                     dmg *= 2
                     self.burst(e.x, e.y, 6, 2.5, 14, color=BLOOD, glow=True)
@@ -965,7 +984,7 @@ class Game:
                 continue
             dx, dy = b.x - p.x, b.y - p.y
             if math.hypot(dx, dy) < rng + 5 and self.level.los(p.x, p.y, b.x, b.y) and \
-                    abs(angdiff(math.atan2(dy, dx), p.aim)) <= arc / 2 + 0.3:
+                    abs(angdiff(math.atan2(dy, dx), p.swing_aim)) <= arc / 2 + 0.3:
                 sp = max(3.5, math.hypot(b.vx, b.vy) * 1.4)
                 b.vx, b.vy = c * sp, s * sp
                 b.enemy = False
@@ -974,21 +993,14 @@ class Game:
                 b.life = 150
                 deflected = True
                 self.burst(b.x, b.y, 4, 1.5, 10, glow=True)
-        if self.perk('warhammer'):
-            self.waves.append([p.x + c * 14, p.y + s * 14, 4, 42, 3 * p.mdmg, False, set(), 2, False])
-            self.sfx.play('slam')
-        if self.perk('daggers') and p.swings % 2 == 0:
-            self.bullets.append(Bullet(p.x + c * 4, p.y + s * 4, p.aim, 6.5, 3 * p.mdmg,
-                                       'dagger', False, 70, 2))
         if deflected:
             self.sfx.play('deflect')
             self.freeze = max(self.freeze, 2)
         if hit:
-            self.freeze = max(self.freeze, 5 if finisher else 3)
-            self.add_shake(6 if finisher else 3)
+            self.freeze = max(self.freeze, 5 if p.finisher else 3)
+            self.add_shake(6 if p.finisher else 3)
             self.sfx.play('hit')
-        elif not deflected:
-            self.sfx.play('swing')
+        return hit or deflected
 
     def cast(self):
         p = self.player
@@ -1252,6 +1264,9 @@ class Game:
             if not e.dead:
                 self.update_enemy(e)
         self.separate()
+        # active frames of a swing: resolve against where everything is drawn this frame
+        if self.state == 'play' and 3 <= p.swing_t <= 7:
+            self.swing_hits()
         self.update_bullets()
         self.update_waves()
         self.update_pickups()
