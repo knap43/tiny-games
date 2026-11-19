@@ -128,6 +128,9 @@ class Sfx:
         'screech': (0.15, 2000, 2600, 0.4, 0.06, 'sq'),
         'growl': (0.3, 90, 60, 0.6, 0.14, 'sq'),
         'toll': (1.2, 110, 108, 0.0, 0.3, 'sin'),
+        'charge': (1.0, 120, 700, 0.15, 0.12, 'sin'),
+        'beam': (0.5, 900, 70, 0.5, 0.32, 'sq'),
+        'ward': (0.35, 220, 45, 0.6, 0.3, 'sq'),
     }
 
     def __init__(self):
@@ -167,22 +170,38 @@ class Sfx:
 
 # ------------------------------------------------------------------ data
 MELEE = {
-    'sword': dict(dmg=4, cd=20, arc=1.9, range=22, kb=2.5, lunge=1.2, tier=0, len=10),
-    'daggers': dict(dmg=2.5, cd=9, arc=1.2, range=17, kb=1.0, lunge=0.8, tier=1, len=6),
-    'spear': dict(dmg=5, cd=24, arc=0.7, range=36, kb=3.0, lunge=1.8, tier=1, len=16),
-    'greataxe': dict(dmg=9, cd=42, arc=2.8, range=27, kb=5.0, lunge=1.5, tier=1, len=12),
-    'scythe': dict(dmg=5, cd=30, arc=3.8, range=29, kb=3.0, lunge=1.0, tier=2, len=14,
-                   drain=True),
-    'warhammer': dict(dmg=7, cd=36, arc=2.2, range=24, kb=6.0, lunge=1.4, tier=2, len=12,
-                      shock=True),
+    'sword': dict(dmg=4, cd=20, arc=1.9, range=22, kb=2.5, lunge=1.2, tier=0,
+                  perk='EVERY THIRD SWING IN A COMBO STRIKES TWICE AS HARD'),
+    'daggers': dict(dmg=2.5, cd=9, arc=1.2, range=17, kb=1.0, lunge=0.8, tier=1,
+                    perk='EVERY SECOND SWING ALSO THROWS A DAGGER'),
+    'spear': dict(dmg=5, cd=24, arc=0.7, range=36, kb=3.0, lunge=1.8, tier=1,
+                  perk='HITS WITH THE TIP DEAL DOUBLE DAMAGE'),
+    'greataxe': dict(dmg=9, cd=42, arc=2.8, range=27, kb=5.0, lunge=1.5, tier=1,
+                     perk='KILLS BURST IN BLOOD, HURTING NEARBY FOES'),
+    'scythe': dict(dmg=5, cd=30, arc=3.8, range=29, kb=3.0, lunge=1.0, tier=2,
+                   perk='KILLS HEAL 1 HP'),
+    'warhammer': dict(dmg=7, cd=36, arc=2.2, range=24, kb=6.0, lunge=1.4, tier=2, shock=True,
+                      perk='EVERY SWING SENDS OUT A SHOCKWAVE'),
 }
 SPELLS = {
-    'firebolt': dict(cost=12, cd=18, n=1, spread=0.0, spd=4.0, dmg=5, kind='fire', tier=0),
-    'hexfan': dict(cost=20, cd=30, n=5, spread=0.5, spd=3.5, dmg=3, kind='fire', tier=1),
-    'bone spear': dict(cost=16, cd=24, n=1, spread=0.0, spd=7.0, dmg=6, kind='bone', tier=1),
-    'soulfire': dict(cost=30, cd=40, n=1, spread=0.0, spd=2.2, dmg=8, kind='orb', tier=2),
+    'firebolt': dict(cost=12, cd=18, n=1, spread=0.0, spd=4.0, dmg=5, kind='fire', tier=0,
+                     desc='A SEARING BOLT'),
+    'hexfan': dict(cost=20, cd=30, n=5, spread=0.5, spd=3.5, dmg=3, kind='fire', tier=1,
+                   desc='A FAN OF FIVE BOLTS'),
+    'bone spear': dict(cost=16, cd=24, n=1, spread=0.0, spd=7.0, dmg=6, kind='bone', tier=1,
+                       desc='FAST, PIERCES THROUGH FOES'),
+    'soul leech': dict(cost=18, cd=26, n=3, spread=0.45, spd=2.6, dmg=3, kind='leech', tier=1,
+                       desc='HOMING WISPS THAT CAN HEAL YOU'),
+    'warding ring': dict(cost=22, cd=40, dmg=4, kind='ring', tier=1,
+                         desc='HURLS FOES AWAY AND BREAKS THEIR BOLTS'),
+    'soulfire': dict(cost=30, cd=40, n=1, spread=0.0, spd=2.2, dmg=8, kind='orb', tier=2,
+                     desc='A SLOW ORB THAT EXPLODES'),
     'blood nova': dict(cost=0, hpcost=2, cd=50, n=16, spread=0.0, spd=3.2, dmg=4,
-                       kind='fire', tier=2, ring=True),
+                       kind='fire', tier=2, ring=True, desc='A RING OF BOLTS, PAID IN BLOOD'),
+    'sunder beam': dict(cost=30, cd=30, dmg=14, kind='beam', charge=60, tier=2,
+                        desc='CHARGE, THEN A BEAM THAT PIERCES ALL'),
+    'spectral blades': dict(cost=35, cd=60, dmg=3, kind='blades', dur=360, tier=2,
+                            desc='THREE BLADES CIRCLE YOU FOR 6 SECONDS'),
 }
 ENEMIES = {
     'ghoul': dict(hp=8, r=5, spd=0.7, souls=2),
@@ -284,6 +303,105 @@ def make_sprites():
         S[k] = {1: (a, b), -1: (pygame.transform.flip(a, True, False),
                                 pygame.transform.flip(b, True, False)), 'corpse': corpse}
     return S
+
+
+def make_knight():
+    """Four-frame walk cycle of the knight, facing right and flipped, plus a corpse."""
+    frames = {1: [], -1: []}
+    for f in range(4):
+        s = pygame.Surface((13, 19), pygame.SRCALPHA)
+        flap = (0, 1, 2, 1)[f]
+        stride = (0, 1, 0, -1)[f]
+        pygame.draw.polygon(s, BLOOD, [(4, 8), (7, 8), (6, 15), (2 - flap // 2, 17),
+                                       (max(0, 2 - flap), 13)])
+        s.fill(BONE, (5 + stride, 15, 2, 3))
+        s.fill(BONE, (8 - stride, 15, 2, 3))
+        s.fill(BLACK, (5 + stride, 17, 2, 1)) if f % 2 else None
+        pygame.draw.rect(s, BONE, (4, 8, 6, 7), border_radius=1)
+        s.fill(BLACK, (4, 13, 6, 1))
+        s.set_at((7, 13), BLOOD)
+        s.fill(BLACK, (6, 9, 1, 3))
+        s.fill(BLACK, (5, 10, 3, 1))
+        pygame.draw.circle(s, BONE, (8, 8), 2)
+        s.set_at((7, 9), BLACK)
+        s.fill(BONE, (9, 10, 2, 2))
+        pygame.draw.rect(s, BONE, (4, 2, 6, 7), border_radius=2)
+        s.fill(BLACK, (7, 4, 3, 1))
+        s.set_at((8, 6), BLACK)
+        s.set_at((8, 7), BLACK)
+        s.set_at((4, 8), BLACK)
+        for px, py in ((6, 1), (5, 0), (4, 0), (5, 1), (4, 1), (3, 1), (2, 2),
+                       (1, 3 + flap % 2), (0, 4 + flap // 2)):
+            s.set_at((px, py), BLOOD)
+        frames[1].append(s)
+        frames[-1].append(pygame.transform.flip(s, True, False))
+    corpse = pygame.transform.rotate(frames[1][0], 90)
+    for y in range(corpse.get_height()):
+        for x in range(corpse.get_width()):
+            if (x + y) % 2:
+                corpse.set_at((x, y), (0, 0, 0, 0))
+    frames['corpse'] = corpse
+    return frames
+
+
+def make_weapon_sprites():
+    """Each weapon points right with its grip on the surface centre, pre-rotated to 64 angles."""
+    def sword(s, x, c):
+        s.set_at((x, c), BONE)
+        s.fill(BLOOD, (x + 1, c, 3, 1))
+        s.fill(BONE, (x + 4, c - 2, 1, 5))
+        s.fill(BONE, (x + 5, c - 1, 9, 3))
+        s.fill(BLACK, (x + 6, c, 7, 1))
+        s.set_at((x + 14, c), BONE)
+
+    def daggers(s, x, c):
+        s.set_at((x, c), BONE)
+        s.fill(BLOOD, (x + 1, c, 2, 1))
+        s.fill(BONE, (x + 3, c - 1, 1, 3))
+        s.fill(BONE, (x + 4, c - 1, 4, 2))
+        s.set_at((x + 8, c - 1), BONE)
+
+    def spear(s, x, c):
+        s.fill(BONE, (x, c, 18, 1))
+        s.fill(BLOOD, (x + 15, c + 1, 2, 2))
+        pygame.draw.polygon(s, BONE, [(x + 17, c - 2), (x + 22, c), (x + 17, c + 2)])
+        s.set_at((x + 18, c), BLACK)
+
+    def greataxe(s, x, c):
+        s.fill(BONE, (x, c, 16, 1))
+        s.fill(BLOOD, (x + 1, c, 3, 1))
+        pygame.draw.polygon(s, BONE, [(x + 12, c - 1), (x + 15, c - 1), (x + 18, c - 5),
+                                      (x + 18, c - 8), (x + 9, c - 8), (x + 9, c - 5)])
+        s.fill(BLACK, (x + 10, c - 6, 8, 1))
+        s.fill(BONE, (x + 13, c + 1, 1, 2))
+        s.set_at((x + 16, c), BONE)
+
+    def scythe(s, x, c):
+        s.fill(BONE, (x, c, 17, 1))
+        s.fill(BLOOD, (x + 1, c, 2, 1))
+        s.fill(BONE, (x + 8, c + 1, 1, 2))
+        pygame.draw.polygon(s, BONE, [(x + 16, c - 1), (x + 17, c + 1), (x + 13, c + 5),
+                                      (x + 6, c + 7), (x + 1, c + 7), (x + 7, c + 5),
+                                      (x + 12, c + 2)])
+
+    def warhammer(s, x, c):
+        s.fill(BONE, (x, c, 13, 1))
+        s.fill(BLOOD, (x + 1, c, 3, 1))
+        s.fill(BONE, (x + 12, c - 4, 4, 9))
+        s.fill(BLACK, (x + 13, c - 3, 2, 1))
+        s.fill(BLACK, (x + 13, c + 2, 2, 1))
+        s.fill(BONE, (x + 16, c - 1, 2, 3))
+
+    defs = {'sword': (15, sword), 'daggers': (9, daggers), 'spear': (23, spear),
+            'greataxe': (18, greataxe), 'scythe': (18, scythe), 'warhammer': (18, warhammer)}
+    out = {}
+    for name, (length, fn) in defs.items():
+        size = 2 * length + 5
+        base = pygame.Surface((size, size), pygame.SRCALPHA)
+        c = size // 2
+        fn(base, c - 2, c)
+        out[name] = [pygame.transform.rotate(base, -math.degrees(i * TAU / 64)) for i in range(64)]
+    return out
 
 
 def light_stamps(r, inner=0.4):
@@ -550,6 +668,13 @@ class Player:
         self.mdmg = self.aspd = self.sdmg = self.reach = self.spd = self.roll_mult = 1.0
         self.blood = self.riposte = self.spirit = 0
         self.soulmana = 1
+        self.combo = self.combo_t = self.swings = 0
+        self.finisher = False
+        self.swing_arc = 0.0
+        self.charge_t = self.blades_t = 0
+        self.blade_cd = {}
+        self.walk = 0.0
+        self.moving = False
 
     def need(self):
         return 14 + self.lv * 9
@@ -611,6 +736,10 @@ class Game:
         self.clock = pygame.time.Clock()
         self.sfx = Sfx()
         self.spr = make_sprites()
+        self.knight = make_knight()
+        self.spr['player']['corpse'] = self.knight['corpse']
+        self.wspr = make_weapon_sprites()
+        self.striking = False
         self.dim = dither_surface(W, H)
         self.dark = pygame.Surface((W, H), pygame.SRCALPHA)
         self.stamps = {r: light_stamps(r) for r in (12, 20, 32, 44, 48, 56, 80)}
@@ -742,17 +871,27 @@ class Game:
     def strike(self):
         p = self.player
         m = MELEE[p.melee]
-        if p.acd > 0 or p.roll_t > 0 or p.drink_t > 0:
+        if p.acd > 0 or p.roll_t > 0 or p.drink_t > 0 or p.charge_t > 0:
             return
         p.acd = max(4, int(m['cd'] / p.aspd))
         p.swing_t = 8
         p.swing_side *= -1
         p.swing_aim = p.aim
-        rng, arc = m['range'] * p.reach, m['arc']
+        p.swings += 1
+        p.combo = p.combo + 1 if p.combo_t > 0 else 1
+        p.combo_t = 50
+        finisher = p.melee == 'sword' and p.combo >= 3
+        if finisher:
+            p.combo = 0
+        p.finisher = finisher
+        rng, arc = m['range'] * p.reach, m['arc'] * (1.35 if finisher else 1)
+        p.swing_arc = arc
         c, s = math.cos(p.aim), math.sin(p.aim)
-        p.wkx += c * m['lunge']
-        p.wky += s * m['lunge']
+        lunge = m['lunge'] * (1.6 if finisher else 1)
+        p.wkx += c * lunge
+        p.wky += s * lunge
         hit = False
+        self.striking = True
         for e in self.enemies:
             if e.dead or e.hidden:
                 continue
@@ -761,12 +900,14 @@ class Game:
             if d > rng + e.r:
                 continue
             if abs(angdiff(math.atan2(dy, dx), p.aim)) <= arc / 2 or d < e.r + p.r + 3:
-                self.hurt_enemy(e, m['dmg'] * p.mdmg, c * m['kb'], s * m['kb'])
+                dmg = m['dmg'] * p.mdmg * (2 if finisher else 1)
+                if p.melee == 'spear' and d > rng * 0.6:
+                    dmg *= 2
+                    self.burst(e.x, e.y, 6, 2.5, 14, color=BLOOD, glow=True)
+                self.hurt_enemy(e, dmg, c * m['kb'], s * m['kb'])
                 self.level.bleed(e.x, e.y, 6)
                 hit = True
-                if m.get('drain') and p.hp < p.maxhp and random.random() < 0.15:
-                    p.hp += 1
-                    self.toast('+1 HP', BLOOD)
+        self.striking = False
         deflected = False
         for b in self.bullets:
             if not b.enemy:
@@ -783,14 +924,17 @@ class Game:
                 deflected = True
                 self.burst(b.x, b.y, 4, 1.5, 10, glow=True)
         if m.get('shock'):
-            self.waves.append([p.x + c * 14, p.y + s * 14, 4, 42, 3, False, set()])
+            self.waves.append([p.x + c * 14, p.y + s * 14, 4, 42, 3 * p.mdmg, False, set(), 2, False])
             self.sfx.play('slam')
+        if p.melee == 'daggers' and p.swings % 2 == 0:
+            self.bullets.append(Bullet(p.x + c * 4, p.y + s * 4, p.aim, 6.5, 3 * p.mdmg,
+                                       'dagger', False, 70, 2))
         if deflected:
             self.sfx.play('deflect')
             self.freeze = max(self.freeze, 2)
         if hit:
-            self.freeze = max(self.freeze, 3)
-            self.add_shake(3)
+            self.freeze = max(self.freeze, 5 if finisher else 3)
+            self.add_shake(6 if finisher else 3)
             self.sfx.play('hit')
         elif not deflected:
             self.sfx.play('swing')
@@ -798,7 +942,7 @@ class Game:
     def cast(self):
         p = self.player
         sp = SPELLS[p.spell]
-        if p.scd > 0 or p.roll_t > 0 or p.drink_t > 0:
+        if p.scd > 0 or p.roll_t > 0 or p.drink_t > 0 or p.charge_t > 0:
             return
         if sp.get('hpcost'):
             if p.hp <= sp['hpcost']:
@@ -814,10 +958,27 @@ class Game:
             return
         p.mana -= sp['cost']
         p.scd = sp['cd']
+        kind = sp['kind']
+        dmg = sp['dmg'] * p.sdmg
+        if kind == 'ring':
+            self.waves.append([p.x, p.y, 6, 56, dmg, False, set(), 6, True])
+            self.burst(p.x, p.y, 18, 3, 22, glow=True)
+            self.add_shake(5)
+            self.sfx.play('ward')
+            return
+        if kind == 'beam':
+            p.charge_t = sp['charge']
+            self.sfx.play('charge')
+            return
+        if kind == 'blades':
+            p.blades_t = sp['dur']
+            p.blade_cd = {}
+            self.burst(p.x, p.y, 12, 2, 20, glow=True)
+            self.sfx.play('cast')
+            return
         x, y = p.x + math.cos(p.aim) * 6, p.y + math.sin(p.aim) * 6
         if self.level.solid_at(x, y):
             x, y = p.x, p.y
-        dmg = sp['dmg'] * p.sdmg
         for i in range(sp['n']):
             if sp.get('ring'):
                 a = p.aim + i * TAU / sp['n']
@@ -825,9 +986,9 @@ class Game:
                 a = p.aim + (i / (sp['n'] - 1) - 0.5) * sp['spread']
             else:
                 a = p.aim
-            r = 5 if sp['kind'] == 'orb' else 2
-            b = Bullet(x, y, a, sp['spd'], dmg, sp['kind'], False, 150, r)
-            if sp['kind'] == 'bone':
+            r = 5 if kind == 'orb' else 2
+            b = Bullet(x, y, a, sp['spd'], dmg, kind, False, 200 if kind == 'leech' else 150, r)
+            if kind == 'bone':
                 b.hits = set()
             self.bullets.append(b)
         p.wkx -= math.cos(p.aim) * 0.8
@@ -835,6 +996,71 @@ class Game:
         self.effects.append(['flash', x, y, 0, 0, 0, 4])
         self.add_shake(2 if not sp.get('ring') else 5)
         self.sfx.play('nova' if sp.get('ring') else 'cast')
+
+    def fire_beam(self):
+        p = self.player
+        c, s = math.cos(p.aim), math.sin(p.aim)
+        x0, y0 = p.x + c * 6, p.y + s * 6
+        x1, y1 = self.level.ray(x0, y0, p.aim, 420, 2)
+        vx, vy = x1 - x0, y1 - y0
+        ll = vx * vx + vy * vy or 1
+        dmg = SPELLS['sunder beam']['dmg'] * p.sdmg
+
+        def near(px, py, rad):
+            t = clamp(((px - x0) * vx + (py - y0) * vy) / ll, 0, 1)
+            return math.hypot(x0 + vx * t - px, y0 + vy * t - py) < rad
+
+        for e in self.enemies:
+            if not e.dead and not e.hidden and near(e.x, e.y, e.r + 4):
+                self.hurt_enemy(e, dmg, c * 3, s * 3)
+                self.level.bleed(e.x, e.y, 10)
+        for b in self.bullets:
+            if b.enemy and near(b.x, b.y, 7):
+                b.life = 0
+        self.effects.append(['beam', x0, y0, x1, y1, 0, 16])
+        self.burst(x1, y1, 14, 3, 20, 2, glow=True)
+        p.wkx -= c * 3
+        p.wky -= s * 3
+        self.add_shake(7)
+        self.freeze = max(self.freeze, 3)
+        self.sfx.play('beam')
+
+    def blade_positions(self):
+        p = self.player
+        out = []
+        for i in range(3):
+            a = self.frame * 0.13 + i * TAU / 3
+            out.append((p.x + math.cos(a) * 22, p.y + math.sin(a) * 22, a))
+        return out
+
+    def update_blades(self):
+        p = self.player
+        dmg = SPELLS['spectral blades']['dmg'] * p.sdmg
+        for bx, by, _ in self.blade_positions():
+            for e in self.enemies:
+                if e.dead or e.hidden or p.blade_cd.get(e.id, 0) > self.frame:
+                    continue
+                if abs(e.x - bx) < e.r + 4 and abs(e.y - by) < e.r + 4:
+                    p.blade_cd[e.id] = self.frame + 20
+                    a = math.atan2(e.y - p.y, e.x - p.x)
+                    self.hurt_enemy(e, dmg, math.cos(a) * 2, math.sin(a) * 2)
+                    self.sfx.play('hit')
+            for b in self.bullets:
+                if b.enemy and abs(b.x - bx) < 5 and abs(b.y - by) < 5:
+                    b.life = 0
+                    self.burst(b.x, b.y, 3, 1.2, 8, glow=True)
+
+    def blood_burst(self, x, y):
+        p = self.player
+        for e in self.enemies:
+            if not e.dead and math.hypot(e.x - x, e.y - y) < 30 + e.r:
+                a = math.atan2(e.y - y, e.x - x)
+                self.hurt_enemy(e, 5 * p.mdmg, math.cos(a) * 3, math.sin(a) * 3)
+        self.effects.append(['boom', x, y, 28, 0, 0, 18, BLOOD])
+        self.level.bleed(x, y, 40, 9)
+        self.burst(x, y, 14, 3, 22, 2, BLOOD)
+        self.add_shake(5)
+        self.sfx.play('slam')
 
     def drink(self):
         p = self.player
@@ -929,6 +1155,14 @@ class Game:
         if p.blood and p.hp < p.maxhp and random.random() < 0.08 * p.blood:
             p.hp += 1
             self.toast('+1 HP', BLOOD)
+        if self.striking:
+            if p.melee == 'scythe' and p.hp < p.maxhp:
+                p.hp += 1
+                self.toast('+1 HP', BLOOD)
+            elif p.melee == 'greataxe':
+                self.striking = False
+                self.blood_burst(e.x, e.y)
+                self.striking = True
         self.burst(e.x, e.y, 12, 2.5, 25, color=BLOOD)
         self.sfx.play('die')
         self.add_shake(2)
@@ -1005,7 +1239,23 @@ class Game:
         l = math.hypot(ix, iy)
         if l:
             ix, iy = ix / l, iy / l
+        if p.combo_t > 0:
+            p.combo_t -= 1
+        if p.charge_t > 0:
+            p.charge_t -= 1
+            if self.frame % 2 == 0:
+                a = random.uniform(0, TAU)
+                hx, hy = p.x + math.cos(p.aim) * 6, p.y + math.sin(p.aim) * 6
+                self.particles.append([hx + math.cos(a) * 18, hy + math.sin(a) * 18,
+                                       -math.cos(a) * 1.5, -math.sin(a) * 1.5, 12, 1, 1,
+                                       BONE, True])
+            if p.charge_t == 0:
+                self.fire_beam()
+        if p.blades_t > 0:
+            p.blades_t -= 1
+            self.update_blades()
         if roll and p.roll_t == 0 and p.roll_cd == 0 and p.drink_t == 0:
+            p.charge_t = 0
             p.rdx, p.rdy = (ix, iy) if l else (math.cos(p.aim), math.sin(p.aim))
             p.roll_t = 14
             p.roll_cd = int(50 * p.roll_mult)
@@ -1018,7 +1268,8 @@ class Game:
             if self.frame % 3 == 0:
                 self.particles.append([p.x, p.y + 3, 0, 0, 15, 1, 1, BONE, False])
         else:
-            spd = 1.45 * p.spd * (0.4 if p.drink_t else 1) * (0.6 if p.swing_t > 4 else 1)
+            spd = 1.45 * p.spd * (0.4 if p.drink_t else 1) * (0.6 if p.swing_t > 4 else 1) \
+                * (0.35 if p.charge_t else 1)
             p.vx += (ix * spd - p.vx) * 0.35
             p.vy += (iy * spd - p.vy) * 0.35
             dx, dy = p.vx, p.vy
@@ -1036,6 +1287,9 @@ class Game:
         p.wky *= 0.6
         p.kx *= 0.6
         p.ky *= 0.6
+        sp = math.hypot(p.vx, p.vy)
+        p.moving = sp > 0.3 and p.roll_t == 0
+        p.walk += sp
 
     def update_enemy(self, e):
         p, lvl = self.player, self.level
@@ -1155,7 +1409,7 @@ class Game:
             if e.wind > 0:
                 e.wind -= 1
                 if e.wind == 0:
-                    self.waves.append([e.x, e.y, 6, 52, 3, True, set()])
+                    self.waves.append([e.x, e.y, 6, 52, 3, True, set(), 0, False])
                     self.add_shake(6)
                     self.sfx.play('slam')
                     e.cd = random.randint(90, 130)
@@ -1213,7 +1467,7 @@ class Game:
             if e.pt > 50:
                 e.flash = 2 if (e.pt // 4) % 2 else 0
             elif e.pt in (50, 38, 26):
-                self.waves.append([e.x, e.y, 8, 100, 3, True, set()])
+                self.waves.append([e.x, e.y, 8, 100, 3, True, set(), 0, False])
                 self.add_shake(8)
                 self.sfx.play('slam')
             if e.pt <= 0:
@@ -1282,9 +1536,21 @@ class Game:
         keep = []
         for b in self.bullets:
             b.life -= 1
+            if b.kind == 'leech':
+                tgt, td = None, 160
+                for e in self.enemies:
+                    if not e.dead and not e.hidden:
+                        d = abs(e.x - b.x) + abs(e.y - b.y)
+                        if d < td:
+                            tgt, td = e, d
+                if tgt:
+                    cur = math.atan2(b.vy, b.vx)
+                    turn = clamp(angdiff(math.atan2(tgt.y - b.y, tgt.x - b.x), cur), -0.16, 0.16)
+                    sp = math.hypot(b.vx, b.vy)
+                    b.vx, b.vy = math.cos(cur + turn) * sp, math.sin(cur + turn) * sp
             b.x += b.vx
             b.y += b.vy
-            if b.kind in ('fire', 'orb') and self.frame % 3 == 0:
+            if b.kind in ('fire', 'orb', 'leech') and self.frame % 3 == 0:
                 self.particles.append([b.x, b.y, random.uniform(-0.3, 0.3), -0.3, 12, 1, 0.95,
                                        BLOOD if b.kind == 'fire' else BONE, True])
             if lvl.solid_at(b.x, b.y) or b.life <= 0:
@@ -1312,6 +1578,9 @@ class Game:
                         continue
                     sp = math.hypot(b.vx, b.vy) or 1
                     self.hurt_enemy(hit, b.dmg, b.vx / sp * 1.5, b.vy / sp * 1.5)
+                    if b.kind == 'leech' and p.hp < p.maxhp and random.random() < 0.25:
+                        p.hp += 1
+                        self.toast('+1 HP', BLOOD)
                     if b.hits is not None:
                         b.hits.add(hit.id)
                     else:
@@ -1320,11 +1589,12 @@ class Game:
         self.bullets = keep
 
     def update_waves(self):
+        # wave = [x, y, radius, max radius, damage, from enemy, already hit, knockback, breaks bolts]
         p = self.player
         keep = []
         for w in self.waves:
             w[2] += 2.6
-            x, y, r, maxr, dmg, enemy, hit = w
+            x, y, r, maxr, dmg, enemy, hit, kb, breaks = w
             if enemy:
                 if 'p' not in hit and abs(math.hypot(p.x - x, p.y - y) - r) < 5 \
                         and p.iframes == 0:
@@ -1336,7 +1606,11 @@ class Game:
                             abs(math.hypot(e.x - x, e.y - y) - r) < e.r + 3:
                         hit.add(e.id)
                         a = math.atan2(e.y - y, e.x - x)
-                        self.hurt_enemy(e, dmg * p.mdmg, math.cos(a) * 2, math.sin(a) * 2)
+                        self.hurt_enemy(e, dmg, math.cos(a) * kb, math.sin(a) * kb)
+                if breaks:
+                    for b in self.bullets:
+                        if b.enemy and math.hypot(b.x - x, b.y - y) < r + 3:
+                            b.life = 0
             if r < maxr:
                 keep.append(w)
         self.waves = keep
@@ -1423,6 +1697,7 @@ class Game:
         self.pickups.append(Pickup(attr, p.x, p.y, getattr(p, attr)))
         setattr(p, attr, best.data)
         self.toast(best.data.upper())
+        p.charge_t = p.combo = 0
         self.sfx.play('pickup')
 
     def update_fx(self):
@@ -1487,6 +1762,9 @@ class Game:
         st = self.stamps[r][((left + self.lox) % 4, (top + self.loy) % 4)]
         self.dark.blit(st, (left, top), special_flags=pygame.BLEND_RGBA_MIN)
 
+    def weapon_img(self, name, angle):
+        return self.wspr[name][int(round(angle / TAU * 64)) % 64]
+
     def draw_world(self):
         s = self.screen
         sh = int(self.shake)
@@ -1516,11 +1794,16 @@ class Game:
             elif k.kind in ('melee', 'spell'):
                 bob = int(math.sin(fr * 0.1 + k.x) * 1.5)
                 if k.kind == 'melee':
-                    pygame.draw.line(s, BONE, (x - 6, y + 3 + bob), (x + 5, y - 3 + bob), 2)
-                    pygame.draw.line(s, BONE, (x - 4, y - 1 + bob), (x - 2, y + 4 + bob), 2)
+                    img = self.weapon_img(k.data, -0.6)
+                    s.blit(img, (x - img.get_width() // 2 - 4, y - img.get_height() // 2 + 3 + bob))
                 else:
-                    pygame.draw.rect(s, BONE, (x - 4, y - 3 + bob, 8, 7))
-                    s.fill(BLOOD, (x - 1, y - 1 + bob, 2, 3))
+                    pygame.draw.rect(s, BONE, (x - 5, y - 4 + bob, 10, 8))
+                    s.fill(BLACK, (x - 4, y - 3 + bob, 1, 6))
+                    s.fill(BLACK, (x - 5, y + 3 + bob, 10, 1))
+                    rune = (sum(map(ord, k.data)) % 4)
+                    cx, cy = x + 1, y - 1 + bob
+                    s.fill(BLOOD, (cx, cy - 2, 1, 5))
+                    s.fill(BLOOD, (cx - 2 + rune % 2 * 2, cy - 1 + rune // 2 * 2, 3, 1))
                 lights.append((x, y, 20))
         for e in self.enemies:
             if e.hidden:
@@ -1537,31 +1820,42 @@ class Game:
             m = MELEE[p.melee]
             if p.swing_t > 0:
                 prog = min(1.0, (8 - p.swing_t) / 3)
-                wa = p.swing_aim - p.swing_side * m['arc'] / 2 * (1 - 2 * prog)
+                wa = p.swing_aim - p.swing_side * p.swing_arc / 2 * (1 - 2 * prog)
+            elif p.charge_t > 0:
+                wa = p.aim
             else:
                 wa = p.aim + 0.9 * face
-            c, sn = math.cos(wa), math.sin(wa)
-            blade = ((x + c * 3, y + 1 + sn * 3), (x + c * m['len'], y + 1 + sn * m['len']))
-            if sn < 0:
-                pygame.draw.line(s, BONE, *blade, 2)
-            img = self.spr['player'][face][0]
+            hand = (x + face * 4, y - 1)
+            wimg = self.weapon_img(p.melee, wa)
+            wpos = (hand[0] - wimg.get_width() // 2, hand[1] - wimg.get_height() // 2)
+            behind = math.sin(wa) < -0.2
+            if behind:
+                s.blit(wimg, wpos)
+            img = self.knight[face][int(p.walk / 5) % 4 if p.moving else 0]
             if p.roll_t > 0:
                 img = pygame.transform.rotate(img, -face * p.roll_t * 26)
-            s.blit(img, (x - img.get_width() // 2, y - img.get_height() // 2))
-            if sn >= 0:
-                pygame.draw.line(s, BLACK, *blade, 4)
-                pygame.draw.line(s, BONE, *blade, 2)
+            s.blit(img, (x - img.get_width() // 2, y - img.get_height() // 2 - 3))
+            if not behind:
+                s.blit(wimg, wpos)
             if p.swing_t > 2:
                 rng = m['range'] * p.reach
-                a0 = p.swing_aim - p.swing_side * m['arc'] / 2
+                a0 = p.swing_aim - p.swing_side * p.swing_arc / 2
                 prog = min(1.0, (8 - p.swing_t) / 3)
                 outer, inner = [], []
                 for i in range(9):
-                    a = a0 + p.swing_side * m['arc'] * prog * i / 8
+                    a = a0 + p.swing_side * p.swing_arc * prog * i / 8
                     outer.append((x + math.cos(a) * rng, y + math.sin(a) * rng))
                     inner.append((x + math.cos(a) * rng * 0.6, y + math.sin(a) * rng * 0.6))
-                pts = outer + inner[::-1]
-                pygame.draw.polygon(s, BONE, pts, 0 if p.swing_t > 5 else 1)
+                pygame.draw.polygon(s, BLOOD if p.finisher else BONE, outer + inner[::-1],
+                                    0 if p.swing_t > 5 else 1)
+        if self.state != 'dead' and p.blades_t > 0 and (p.blades_t > 60 or fr % 4 < 2):
+            for bx, by, a in self.blade_positions():
+                bimg = self.weapon_img('daggers', a + math.pi / 2)
+                s.blit(bimg, (int(bx - ox) - bimg.get_width() // 2,
+                              int(by - oy) - bimg.get_height() // 2))
+                lights.append((int(bx - ox), int(by - oy), 12))
+        if p.charge_t > 0 and self.state != 'dead':
+            lights.append((int(p.x - ox), int(p.y - oy), 32))
         for b in self.bullets:
             if b.enemy:
                 continue
@@ -1580,6 +1874,14 @@ class Game:
             elif b.kind == 'deflect':
                 pygame.draw.circle(s, BONE, (x, y), 3)
                 lights.append((x, y, 12))
+            elif b.kind == 'leech':
+                pygame.draw.circle(s, BLOOD, (x, y), 2)
+                s.set_at((x, y), BONE)
+                lights.append((x, y, 12))
+            elif b.kind == 'dagger':
+                img = self.weapon_img('daggers', math.atan2(b.vy, b.vx))
+                s.blit(img, (x - img.get_width() // 2, y - img.get_height() // 2))
+                lights.append((x, y, 12))
         for q in self.particles:
             if not q[8]:
                 s.fill(q[7], (int(q[0] - ox), int(q[1] - oy), q[5], q[5]))
@@ -1588,13 +1890,18 @@ class Game:
             if k == 'boom':
                 x, y, r = int(f[1] - ox), int(f[2] - oy), f[3]
                 if t < 4:
-                    pygame.draw.circle(s, BONE, (x, y), int(r))
+                    pygame.draw.circle(s, f[7] if len(f) > 7 else BONE, (x, y), int(r))
                 else:
                     pygame.draw.circle(s, BLOOD, (x, y), int(r * (0.7 + 0.5 * t / life)),
                                        max(1, 4 - t // 5))
                 lights.append((x, y, 56 if t < 10 else 32))
             elif k == 'flash':
                 pygame.draw.circle(s, BONE, (int(f[1] - ox), int(f[2] - oy)), 4 - t)
+            elif k == 'beam':
+                x0, y0, x1, y1 = f[1] - ox, f[2] - oy, f[3] - ox, f[4] - oy
+                n = max(1, int(math.hypot(x1 - x0, y1 - y0) / 30))
+                for i in range(n + 1):
+                    lights.append((int(x0 + (x1 - x0) * i / n), int(y0 + (y1 - y0) * i / n), 32))
         for w in self.waves:
             if not w[5]:
                 pygame.draw.circle(s, BONE, (int(w[0] - ox), int(w[1] - oy)), int(w[2]), 2)
@@ -1666,6 +1973,24 @@ class Game:
             else:
                 pygame.draw.circle(s, BLOOD, (x, y), b.r)
                 s.set_at((x, y), BONE)
+        for f in self.effects:
+            if f[0] == 'beam':
+                t = f[5]
+                a, b = (f[1] - ox, f[2] - oy), (f[3] - ox, f[4] - oy)
+                wdt = 7 if t < 3 else max(1, 6 - t // 3)
+                pygame.draw.line(s, BLOOD, a, b, wdt + 4)
+                pygame.draw.line(s, BONE, a, b, wdt)
+        if p.charge_t > 0 and self.state == 'play':
+            prog = 1 - p.charge_t / SPELLS['sunder beam']['charge']
+            hx, hy = p.x + math.cos(p.aim) * 6, p.y + math.sin(p.aim) * 6
+            x1, y1 = self.level.ray(hx, hy, p.aim, 420, 3)
+            gap = max(2, int(10 - prog * 8))
+            n = int(math.hypot(x1 - hx, y1 - hy) / gap)
+            c, sn = math.cos(p.aim) * gap, math.sin(p.aim) * gap
+            if prog > 0.15 or fr % 2:
+                for i in range(1, n):
+                    s.set_at((int(hx + c * i - ox), int(hy + sn * i - oy)), BONE)
+            pygame.draw.circle(s, BONE, (int(hx - ox), int(hy - oy)), 1 + int(prog * 3))
         for w in self.waves:
             if w[5]:
                 pygame.draw.circle(s, BLOOD, (int(w[0] - ox), int(w[1] - oy)), int(w[2]), 2)
@@ -1674,7 +1999,12 @@ class Game:
                 s.fill(q[7], (int(q[0] - ox), int(q[1] - oy), q[5], q[5]))
         for k in self.pickups:
             if k.kind in ('melee', 'spell') and math.hypot(k.x - p.x, k.y - p.y) < 18:
-                draw_text(s, 'E: ' + k.data, int(k.x - ox), int(k.y - oy) - 14, align='c')
+                info = MELEE[k.data]['perk'] if k.kind == 'melee' else SPELLS[k.data]['desc']
+                lines = wrap(info, 32)
+                y0 = int(k.y - oy) - 14 - 7 * len(lines)
+                draw_text(s, 'E: ' + k.data, int(k.x - ox), y0, align='c')
+                for i, line in enumerate(lines):
+                    draw_text(s, line, int(k.x - ox), y0 + 7 * (i + 1), align='c', color=BLOOD)
         for x, y, txt, life, col in self.texts:
             if life > 10 or fr % 2:
                 draw_text(s, txt, int(x - ox), int(y - oy), align='c', color=col)
@@ -1803,6 +2133,9 @@ class Game:
                 draw_text(s, 'PAUSED', W // 2, 70, 3, 'c')
                 draw_text(s, 'ESC  RESUME', W // 2, 105, 1, 'c')
                 draw_text(s, 'X  ABANDON RUN', W // 2, 115, 1, 'c')
+                pl = self.player
+                draw_text(s, f'{pl.melee}: ' + MELEE[pl.melee]['perk'], W // 2, 160, 1, 'c')
+                draw_text(s, f'{pl.spell}: ' + SPELLS[pl.spell]['desc'], W // 2, 170, 1, 'c')
                 if self.player.boons:
                     draw_text(s, ', '.join(self.player.boons), W // 2, 140, 1, 'c')
             elif self.state == 'dead':
