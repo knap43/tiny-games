@@ -170,18 +170,12 @@ class Sfx:
 
 # ------------------------------------------------------------------ data
 MELEE = {
-    'sword': dict(dmg=4, cd=20, arc=1.9, range=22, kb=2.5, lunge=1.2, tier=0,
-                  perk='EVERY THIRD SWING IN A COMBO STRIKES TWICE AS HARD'),
-    'daggers': dict(dmg=2.5, cd=9, arc=1.2, range=17, kb=1.0, lunge=0.8, tier=1,
-                    perk='EVERY SECOND SWING ALSO THROWS A DAGGER'),
-    'spear': dict(dmg=5, cd=24, arc=0.7, range=36, kb=3.0, lunge=1.8, tier=1,
-                  perk='HITS WITH THE TIP DEAL DOUBLE DAMAGE'),
-    'greataxe': dict(dmg=9, cd=42, arc=2.8, range=27, kb=5.0, lunge=1.5, tier=1,
-                     perk='KILLS BURST IN BLOOD, HURTING NEARBY FOES'),
-    'scythe': dict(dmg=5, cd=30, arc=3.8, range=29, kb=3.0, lunge=1.0, tier=2,
-                   perk='KILLS HEAL 1 HP'),
-    'warhammer': dict(dmg=7, cd=36, arc=2.2, range=24, kb=6.0, lunge=1.4, tier=2, shock=True,
-                      perk='EVERY SWING SENDS OUT A SHOCKWAVE'),
+    'sword': dict(dmg=4, cd=20, arc=1.9, range=22, kb=2.5, lunge=1.2, tier=0),
+    'daggers': dict(dmg=2.5, cd=9, arc=1.2, range=17, kb=1.0, lunge=0.8, tier=1),
+    'spear': dict(dmg=5, cd=24, arc=0.7, range=36, kb=3.0, lunge=1.8, tier=1),
+    'greataxe': dict(dmg=9, cd=42, arc=2.8, range=27, kb=5.0, lunge=1.5, tier=1),
+    'scythe': dict(dmg=5, cd=30, arc=3.8, range=29, kb=3.0, lunge=1.0, tier=2),
+    'warhammer': dict(dmg=7, cd=36, arc=2.2, range=24, kb=6.0, lunge=1.4, tier=2),
 }
 SPELLS = {
     'firebolt': dict(cost=12, cd=18, n=1, spread=0.0, spd=4.0, dmg=5, kind='fire', tier=0,
@@ -229,6 +223,18 @@ BOONS = [
     ('SHADOWSTEP', 'ROLL TWICE AS OFTEN', [('roll_mult', '*', 0.5)]),
     ('LAST RITES', 'SURVIVE ONE LETHAL BLOW', [('spirit', '+', 1)]),
 ]
+
+# Weapon boons only work while that weapon is in hand: (name, desc, [('wperk', 'add', weapon)])
+WEAPON_BOONS = [
+    ('RHYTHM OF STEEL', 'SWORD: EVERY THIRD SWING IN A COMBO STRIKES TWICE AS HARD', 'sword'),
+    ('KNIFE JUGGLER', 'DAGGERS: EVERY SECOND SWING ALSO THROWS ONE', 'daggers'),
+    ('POINT OF FAITH', 'SPEAR: HITS WITH THE TIP DEAL DOUBLE DAMAGE', 'spear'),
+    ('RED HARVEST', 'GREATAXE: KILLS BURST IN BLOOD, HURTING NEARBY FOES', 'greataxe'),
+    ('REAPER', 'SCYTHE: KILLS HEAL 1 HP', 'scythe'),
+    ('TREMOR', 'WARHAMMER: EVERY SWING SENDS OUT A SHOCKWAVE', 'warhammer'),
+]
+WEAPON_BOONS = [(n, d, [('wperks', 'add', w)]) for n, d, w in WEAPON_BOONS]
+WEAPON_PERK = {e[0][2]: d for _, d, e in WEAPON_BOONS}
 
 
 # ------------------------------------------------------------------ graphics
@@ -674,6 +680,7 @@ class Player:
         self.charge_t = self.blades_t = 0
         self.blade_cd = {}
         self.walk = 0.0
+        self.wperks = set()
         self.moving = False
 
     def need(self):
@@ -868,6 +875,10 @@ class Game:
         self.oy = math.floor(p.y) - math.floor(p.y - self.camy)
 
     # ---------------------------------------------------------- player actions
+    def perk(self, weapon):
+        p = self.player
+        return p.melee == weapon and weapon in p.wperks
+
     def strike(self):
         p = self.player
         m = MELEE[p.melee]
@@ -880,7 +891,7 @@ class Game:
         p.swings += 1
         p.combo = p.combo + 1 if p.combo_t > 0 else 1
         p.combo_t = 50
-        finisher = p.melee == 'sword' and p.combo >= 3
+        finisher = self.perk('sword') and p.combo >= 3
         if finisher:
             p.combo = 0
         p.finisher = finisher
@@ -901,7 +912,7 @@ class Game:
                 continue
             if abs(angdiff(math.atan2(dy, dx), p.aim)) <= arc / 2 or d < e.r + p.r + 3:
                 dmg = m['dmg'] * p.mdmg * (2 if finisher else 1)
-                if p.melee == 'spear' and d > rng * 0.6:
+                if self.perk('spear') and d > rng * 0.6:
                     dmg *= 2
                     self.burst(e.x, e.y, 6, 2.5, 14, color=BLOOD, glow=True)
                 self.hurt_enemy(e, dmg, c * m['kb'], s * m['kb'])
@@ -923,10 +934,10 @@ class Game:
                 b.life = 150
                 deflected = True
                 self.burst(b.x, b.y, 4, 1.5, 10, glow=True)
-        if m.get('shock'):
+        if self.perk('warhammer'):
             self.waves.append([p.x + c * 14, p.y + s * 14, 4, 42, 3 * p.mdmg, False, set(), 2, False])
             self.sfx.play('slam')
-        if p.melee == 'daggers' and p.swings % 2 == 0:
+        if self.perk('daggers') and p.swings % 2 == 0:
             self.bullets.append(Bullet(p.x + c * 4, p.y + s * 4, p.aim, 6.5, 3 * p.mdmg,
                                        'dagger', False, 70, 2))
         if deflected:
@@ -1156,10 +1167,10 @@ class Game:
             p.hp += 1
             self.toast('+1 HP', BLOOD)
         if self.striking:
-            if p.melee == 'scythe' and p.hp < p.maxhp:
+            if self.perk('scythe') and p.hp < p.maxhp:
                 p.hp += 1
                 self.toast('+1 HP', BLOOD)
-            elif p.melee == 'greataxe':
+            elif self.perk('greataxe'):
                 self.striking = False
                 self.blood_burst(e.x, e.y)
                 self.striking = True
@@ -1728,7 +1739,14 @@ class Game:
     # ---------------------------------------------------------- boons
     def open_boons(self):
         self.state = 'boon'
-        self.boon_opts = random.sample(BOONS, 4)
+        p = self.player
+        pool = [(b, 2) for b in BOONS]
+        pool += [(b, 3 if b[2][0][2] == p.melee else 1) for b in WEAPON_BOONS
+                 if b[2][0][2] not in p.wperks]
+        self.boon_opts = []
+        while len(self.boon_opts) < 4 and pool:
+            i = random.choices(range(len(pool)), [w for _, w in pool])[0]
+            self.boon_opts.append(pool.pop(i)[0])
         self.boon_t = 0
 
     def pick_boon(self, i):
@@ -1738,7 +1756,10 @@ class Game:
         name, _, effects = self.boon_opts[i]
         for attr, op, v in effects:
             cur = getattr(p, attr)
-            setattr(p, attr, cur + v if op == '+' else cur * v)
+            if op == 'add':
+                cur.add(v)
+            else:
+                setattr(p, attr, cur + v if op == '+' else cur * v)
         p.hp = min(p.hp, p.maxhp)
         p.vials = min(p.vials, p.maxvials)
         p.boons.append(name)
@@ -1999,7 +2020,12 @@ class Game:
                 s.fill(q[7], (int(q[0] - ox), int(q[1] - oy), q[5], q[5]))
         for k in self.pickups:
             if k.kind in ('melee', 'spell') and math.hypot(k.x - p.x, k.y - p.y) < 18:
-                info = MELEE[k.data]['perk'] if k.kind == 'melee' else SPELLS[k.data]['desc']
+                if k.kind == 'spell':
+                    info = SPELLS[k.data]['desc']
+                elif k.data in p.wperks:
+                    info = 'YOUR BOON: ' + WEAPON_PERK[k.data].split(': ', 1)[1]
+                else:
+                    info = ''
                 lines = wrap(info, 32)
                 y0 = int(k.y - oy) - 14 - 7 * len(lines)
                 draw_text(s, 'E: ' + k.data, int(k.x - ox), y0, align='c')
@@ -2110,6 +2136,13 @@ class Game:
             else:
                 pygame.draw.rect(s, BONE, r, 1)
             draw_text(s, str(i + 1), r.centerx, r.y + 6, 2, 'c', BLOOD, False)
+            eff = self.boon_opts[i][2][0]
+            if eff[1] == 'add':
+                icon = self.weapon_img(eff[2], -0.7).copy()
+                icon.fill(BLOOD + (255,), special_flags=pygame.BLEND_RGBA_MIN)
+                s.set_clip(r.inflate(-4, -4))
+                s.blit(icon, (r.right - 15 - icon.get_width() // 2, r.y + 14 - icon.get_height() // 2))
+                s.set_clip(None)
             for j, line in enumerate(wrap(name, 20)):
                 draw_text(s, line, r.centerx, r.y + 24 + j * 7, 1, 'c', col, False)
             for j, line in enumerate(wrap(desc, 20)):
@@ -2134,7 +2167,8 @@ class Game:
                 draw_text(s, 'ESC  RESUME', W // 2, 105, 1, 'c')
                 draw_text(s, 'X  ABANDON RUN', W // 2, 115, 1, 'c')
                 pl = self.player
-                draw_text(s, f'{pl.melee}: ' + MELEE[pl.melee]['perk'], W // 2, 160, 1, 'c')
+                draw_text(s, WEAPON_PERK[pl.melee] if pl.melee in pl.wperks
+                          else f'{pl.melee}: NO BOON YET', W // 2, 160, 1, 'c')
                 draw_text(s, f'{pl.spell}: ' + SPELLS[pl.spell]['desc'], W // 2, 170, 1, 'c')
                 if self.player.boons:
                     draw_text(s, ', '.join(self.player.boons), W // 2, 140, 1, 'c')
