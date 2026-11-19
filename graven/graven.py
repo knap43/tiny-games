@@ -128,6 +128,7 @@ class Sfx:
         'screech': (0.15, 2000, 2600, 0.4, 0.06, 'sq'),
         'growl': (0.3, 90, 60, 0.6, 0.14, 'sq'),
         'toll': (1.2, 110, 108, 0.0, 0.3, 'sin'),
+        'rumble': (0.9, 70, 35, 0.8, 0.25, 'sq'),
         'charge': (1.0, 120, 700, 0.15, 0.12, 'sin'),
         'beam': (0.5, 900, 70, 0.5, 0.32, 'sq'),
         'ward': (0.35, 220, 45, 0.6, 0.3, 'sq'),
@@ -204,10 +205,20 @@ ENEMIES = {
     'archer': dict(hp=6, r=5, spd=0.5, souls=3),
     'revenant': dict(hp=26, r=7, spd=0.45, souls=6),
     'boss': dict(hp=260, r=13, spd=0.7, souls=45),
+    'wyrm': dict(hp=240, r=7, spd=1.35, souls=45),
+    'wyrmseg': dict(hp=1, r=6, spd=0, souls=0),
 }
 EYES = {'ghoul': [(1, -3), (3, -3)], 'cultist': [(0, -3), (2, -3)], 'bat': [(-1, 0), (1, 0)],
         'archer': [(-1, -4), (1, -4)], 'revenant': [(0, -5), (2, -5)],
-        'boss': [(-2, -7), (2, -7)]}
+        'boss': [(-2, -7), (2, -7)], 'wyrm': [(3, -3), (5, -3)], 'wyrmseg': []}
+BOSS_NAMES = {'boss': 'THE HOLLOW KING', 'wyrm': 'THE OSSUARY WYRM'}
+BIG = ('boss', 'wyrm', 'wyrmseg')   # not shoved around by crowding or knockback
+WYRM_SEGS, WYRM_GAP = 10, 5           # body segments; trail frames between them
+
+
+def rid(e):
+    """Identity that damage is de-duplicated on: wyrm segments share their head's."""
+    return e.head.id if e.kind == 'wyrmseg' else e.id
 BOONS = [
     ('IRON FLESH', 'MAX HP +4 AND HEAL 4', [('maxhp', '+', 4), ('hp', '+', 4)]),
     ('KEEN EDGE', 'MELEE DEALS 25% MORE', [('mdmg', '*', 1.25)]),
@@ -293,9 +304,27 @@ def make_sprites():
                                    (22, 6)], 0 if f else 1)
         pygame.draw.line(s, c, (16, 16), (16, 30), 1)
 
+    def wyrm(s, f):
+        w, c = (0, BLOOD) if f else (1, BONE)
+        pygame.draw.polygon(s, c, [(1, 4), (8, 1), (14, 2), (18, 6), (18, 9), (14, 12), (8, 13),
+                                   (1, 10)], w)
+        pygame.draw.line(s, c, (7, 9), (18, 9))
+        for tx in (10, 13, 16):
+            pygame.draw.line(s, c, (tx, 9), (tx, 11))
+        pygame.draw.line(s, c, (5, 2), (2, 0))
+        pygame.draw.line(s, c, (8, 1), (7, 0))
+        pygame.draw.ellipse(s, BLACK, (11, 3, 5, 3))
+
+    def wyrmseg(s, f):
+        w, c = (0, BLOOD) if f else (1, BONE)
+        pygame.draw.circle(s, c, (6, 6), 4, w)
+        for a, b in (((6, 0), (6, 2)), ((6, 10), (6, 12)), ((0, 6), (2, 6)), ((10, 6), (12, 6))):
+            pygame.draw.line(s, c, a, b)
+        s.set_at((6, 6), BLACK if f else BONE)
+
     defs = {'player': (11, 13, player), 'ghoul': (13, 13, ghoul), 'cultist': (13, 15, cultist),
             'bat': (13, 7, bat), 'archer': (13, 14, archer), 'revenant': (17, 17, revenant),
-            'boss': (33, 34, boss)}
+            'boss': (33, 34, boss), 'wyrm': (19, 15, wyrm), 'wyrmseg': (13, 13, wyrmseg)}
     S = {}
     for k, (w, h, fn) in defs.items():
         a, b = surf(w, h), surf(w, h)
@@ -828,11 +857,26 @@ class Game:
                                           ty * T + 8 + random.uniform(-3, 3), hpm))
         if is_boss:
             ax, ay = lvl.arena
-            self.enemies.append(Enemy('boss', ax * T + 8, ay * T + 8, hpm))
+            if ((n - 1) // 3) % 2 == 0:
+                self.enemies.append(Enemy('boss', ax * T + 8, ay * T + 8, hpm))
+            else:
+                self.spawn_wyrm(ax * T + 8, ay * T + 8, hpm)
         for kind in ['reliquary', 'coffer'] + (['reliquary'] if is_boss else []):
             tx, ty = random.choice([f for f in lvl.floor
                                     if 6 < abs(f[0] - sx) + abs(f[1] - sy)] or lvl.floor)
             self.pickups.append(Pickup(kind, tx * T + 8, ty * T + 8))
+
+    def spawn_wyrm(self, x, y, hpm):
+        head = Enemy('wyrm', x, y, hpm)
+        head.trail = deque([(x, y)] * ((WYRM_SEGS + 1) * WYRM_GAP + 1),
+                           maxlen=(WYRM_SEGS + 1) * WYRM_GAP + 1)
+        head.segs = []
+        for i in range(WYRM_SEGS):
+            seg = Enemy('wyrmseg', x, y, 1)
+            seg.head, seg.idx = head, i
+            head.segs.append(seg)
+        self.enemies.extend(reversed(head.segs))   # tail first, so the head draws on top
+        self.enemies.append(head)
 
     # ---------------------------------------------------------- helpers
     def move(self, e, dx, dy):
@@ -959,7 +1003,7 @@ class Game:
         hit = False
         self.striking = True
         for e in self.enemies:
-            if e.dead or e.hidden or e.id in p.swing_hit:
+            if e.dead or e.hidden or rid(e) in p.swing_hit:
                 continue
             dx, dy = e.x - p.x, e.y - p.y
             d = math.hypot(dx, dy)
@@ -969,7 +1013,7 @@ class Game:
             half = arc / 2 + math.asin(min(1.0, e.r / max(d, 0.01)))
             if (abs(angdiff(math.atan2(dy, dx), p.swing_aim)) <= half or d < e.r + p.r + 3) \
                     and self.reachable(e.x, e.y, e.r):
-                p.swing_hit.add(e.id)
+                p.swing_hit.add(rid(e))
                 dmg = m['dmg'] * p.mdmg * (2 if p.finisher else 1)
                 if self.perk('spear') and d > rng * 0.6:
                     dmg *= 2
@@ -1073,8 +1117,10 @@ class Game:
             t = clamp(((px - x0) * vx + (py - y0) * vy) / ll, 0, 1)
             return math.hypot(x0 + vx * t - px, y0 + vy * t - py) < rad
 
+        struck = set()
         for e in self.enemies:
-            if not e.dead and not e.hidden and near(e.x, e.y, e.r + 4):
+            if not e.dead and not e.hidden and rid(e) not in struck and near(e.x, e.y, e.r + 4):
+                struck.add(rid(e))
                 self.hurt_enemy(e, dmg, c * 3, s * 3)
                 self.level.bleed(e.x, e.y, 10)
         for b in self.bullets:
@@ -1101,10 +1147,10 @@ class Game:
         dmg = SPELLS['spectral blades']['dmg'] * p.sdmg
         for bx, by, _ in self.blade_positions():
             for e in self.enemies:
-                if e.dead or e.hidden or p.blade_cd.get(e.id, 0) > self.frame:
+                if e.dead or e.hidden or p.blade_cd.get(rid(e), 0) > self.frame:
                     continue
                 if abs(e.x - bx) < e.r + 4 and abs(e.y - by) < e.r + 4:
-                    p.blade_cd[e.id] = self.frame + 20
+                    p.blade_cd[rid(e)] = self.frame + 20
                     a = math.atan2(e.y - p.y, e.x - p.x)
                     self.hurt_enemy(e, dmg, math.cos(a) * 2, math.sin(a) * 2)
                     self.sfx.play('hit')
@@ -1115,8 +1161,10 @@ class Game:
 
     def blood_burst(self, x, y):
         p = self.player
+        struck = set()
         for e in self.enemies:
-            if not e.dead and math.hypot(e.x - x, e.y - y) < 30 + e.r:
+            if not e.dead and rid(e) not in struck and math.hypot(e.x - x, e.y - y) < 30 + e.r:
+                struck.add(rid(e))
                 a = math.atan2(e.y - y, e.x - x)
                 self.hurt_enemy(e, 5 * p.mdmg, math.cos(a) * 3, math.sin(a) * 3)
         self.effects.append(['boom', x, y, 28, 0, 0, 18, BLOOD])
@@ -1145,10 +1193,16 @@ class Game:
     def hurt_enemy(self, e, dmg, kx=0.0, ky=0.0):
         if e.dead or e.hidden:
             return
+        if e.kind == 'wyrmseg':          # the body is one creature: hits land on the head
+            e.flash = 5
+            self.burst(e.x, e.y, 4, 1.8, 14, color=BLOOD)
+            e = e.head
+            if e.dead:
+                return
         e.hp -= dmg
         e.flash = 5
         e.alert = True
-        kb = 0.1 if e.kind == 'boss' else (0.5 if e.kind == 'revenant' else 1.2)
+        kb = 0.1 if e.kind in BIG else (0.5 if e.kind == 'revenant' else 1.2)
         e.kx += kx * kb
         e.ky += ky * kb
         self.burst(e.x, e.y, 4, 1.8, 14, color=BLOOD)
@@ -1189,8 +1243,10 @@ class Game:
                     pass
 
     def explode(self, x, y, r, dmg):
+        struck = set()
         for e in self.enemies:
-            if not e.dead and math.hypot(e.x - x, e.y - y) < r + e.r:
+            if not e.dead and rid(e) not in struck and math.hypot(e.x - x, e.y - y) < r + e.r:
+                struck.add(rid(e))
                 a = math.atan2(e.y - y, e.x - x)
                 self.hurt_enemy(e, dmg, math.cos(a) * 3, math.sin(a) * 3)
         self.effects.append(['boom', x, y, r, 0, 0, 22])
@@ -1206,7 +1262,7 @@ class Game:
     def kill(self, e):
         p = self.player
         e.dead = True
-        self.kills += 1
+        self.kills += e.kind != 'wyrmseg'
         self.last_kill = (e.x, e.y)
         self.stamp_corpse(e.kind, e.x, e.y)
         for _ in range(e.souls):
@@ -1229,7 +1285,13 @@ class Game:
         self.burst(e.x, e.y, 12, 2.5, 25, color=BLOOD)
         self.sfx.play('die')
         self.add_shake(2)
-        if e.kind == 'boss':
+        if e.kind == 'wyrm':
+            for seg in e.segs:
+                if not seg.dead:
+                    seg.dead = True
+                    self.stamp_corpse('wyrmseg', seg.x, seg.y)
+                    self.burst(seg.x, seg.y, 6, 2, 20, color=BLOOD)
+        if e.kind in ('boss', 'wyrm'):
             self.freeze = 30
             self.add_shake(16)
             self.boss = None
@@ -1360,6 +1422,9 @@ class Game:
 
     def update_enemy(self, e):
         p, lvl = self.player, self.level
+        if e.kind == 'wyrmseg':
+            self.update_wyrmseg(e)
+            return
         dx, dy = p.x - e.x, p.y - e.y
         dist = math.hypot(dx, dy)
         e.dist = dist
@@ -1386,6 +1451,10 @@ class Game:
         if k == 'boss':
             if e.alert:
                 self.update_boss(e, dist, ang)
+            return
+        if k == 'wyrm':
+            if e.alert:
+                self.update_wyrm(e, dist, ang)
             return
         if not e.alert:
             e.wt -= 1
@@ -1492,6 +1561,118 @@ class Game:
         e.kx *= 0.7
         e.ky *= 0.7
 
+    def update_wyrmseg(self, e):
+        h = e.head
+        if h.dead:
+            e.dead = True
+            return
+        e.hidden = h.hidden
+        e.x, e.y = h.trail[-1 - (e.idx + 1) * WYRM_GAP]
+        e.face = h.face
+        if e.flash:
+            e.flash -= 1
+        p = self.player
+        if not e.hidden and h.alert and math.hypot(p.x - e.x, p.y - e.y) < e.r + p.r:
+            self.hurt_player(2)
+
+    def nearest_floor(self, x, y):
+        lvl = self.level
+        tx, ty = int(x // T), int(y // T)
+        for r in range(12):
+            for dy in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    if max(abs(dx), abs(dy)) == r and not lvl.solid(tx + dx, ty + dy):
+                        return (tx + dx) * T + 8, (ty + dy) * T + 8
+        return x, y
+
+    def update_wyrm(self, e, dist, ang):
+        p, lvl = self.player, self.level
+        if self.boss is None:
+            self.boss = e
+            self.sfx.play('toll')
+        rage = e.hp < e.maxhp / 2
+        e.pt -= 1
+        if e.phase == 'stalk':
+            e.phase, e.pt, e.aim = 'slither', 150, ang
+        if e.phase == 'slither':
+            spd = e.spd * (1.3 if rage else 1)
+            if e.los:
+                want = ang + math.sin(self.frame * 0.07) * 0.7
+            else:
+                nx, ny = lvl.nav(e.x, e.y, p.x, p.y)
+                want = math.atan2(ny, nx)
+            e.aim += clamp(angdiff(want, e.aim), -0.08, 0.08)
+            hx, hy = self.move(e, math.cos(e.aim) * spd + e.kx, math.sin(e.aim) * spd + e.ky)
+            if hx:
+                e.aim = math.pi - e.aim
+            if hy:
+                e.aim = -e.aim
+            e.trail.append((e.x, e.y))
+            if e.pt <= 0:
+                e.phase = random.choice(['burrow', 'burrow', 'spit', 'rattle'])
+                e.pt = {'burrow': 130, 'spit': 50, 'rattle': 70}[e.phase]
+                if e.phase == 'burrow':
+                    e.hidden = True
+                    for seg in e.segs:
+                        self.burst(seg.x, seg.y, 5, 2, 25, color=BONE)
+                    self.add_shake(5)
+                    self.sfx.play('rumble')
+        elif e.phase == 'burrow':
+            if e.pt > 40:  # tunnels through stone straight at the player
+                a = math.atan2(p.y - e.y, p.x - e.x)
+                e.x = clamp(e.x + math.cos(a) * 2.4, T, (MW - 1) * T)
+                e.y = clamp(e.y + math.sin(a) * 2.4, T, (MH - 1) * T)
+                if self.frame % 2 == 0:
+                    self.particles.append([e.x + random.uniform(-5, 5), e.y + random.uniform(-3, 3),
+                                           random.uniform(-0.5, 0.5), -random.uniform(0.2, 0.8),
+                                           22, 1, 0.95, BONE, True])
+            elif e.pt == 40:
+                if lvl.box_hits(e.x, e.y, e.r):
+                    e.x, e.y = self.nearest_floor(e.x, e.y)
+                self.sfx.play('growl')
+            elif e.pt == 10:
+                e.hidden = False
+                e.trail.extend([(e.x, e.y)] * e.trail.maxlen)
+                n = 18 if rage else 14
+                for i in range(n):
+                    self.enemy_shot(e, i * TAU / n + random.uniform(-0.1, 0.1), 2.0, 2, 'ebolt', 3)
+                if dist < e.r + p.r + 16:
+                    self.hurt_player(3)
+                self.burst(e.x, e.y, 24, 3.5, 30, 2, BONE)
+                self.add_shake(10)
+                self.sfx.play('boom')
+                e.aim = ang
+            if e.pt <= 0:
+                e.phase, e.pt = 'slither', 150
+        elif e.phase == 'spit':
+            e.aim += clamp(angdiff(ang, e.aim), -0.1, 0.1)
+            if e.pt in (40, 28, 16):
+                n = 7 if rage else 5
+                for i in range(n):
+                    self.enemy_shot(e, e.aim + (i - n // 2) * 0.22, 2.6, 2, 'ebolt', 3)
+                self.sfx.play('bolt')
+                self.add_shake(2)
+            if e.pt <= 0:
+                e.phase, e.pt = 'slither', 150
+        elif e.phase == 'rattle':
+            e.flash = 2 if (e.pt // 4) % 2 and e.pt > 55 else 0
+            if e.pt in ((50, 30, 10) if rage else (50, 25)):
+                prev = e
+                for seg in e.segs:
+                    a = math.atan2(seg.y - prev.y, seg.x - prev.x)
+                    for side in (-1, 1):
+                        self.enemy_shot(seg, a + side * math.pi / 2, 1.7, 2, 'ebolt', 3)
+                    prev = seg
+                self.sfx.play('nova')
+                self.add_shake(3)
+            if e.pt <= 0:
+                e.phase, e.pt = 'slither', 150
+        if not e.hidden and dist < e.r + p.r:
+            self.hurt_player(3)
+        e.face = 1 if math.cos(e.aim) >= 0 else -1
+        e.kx *= 0.7
+        e.ky *= 0.7
+
     def update_boss(self, e, dist, ang):
         p = self.player
         if self.boss is None:
@@ -1593,9 +1774,9 @@ class Game:
                 if d < md:
                     push = (md - d) * 0.25
                     ux, uy = dx / d * push, dy / d * push
-                    if a.kind != 'boss':
+                    if a.kind not in BIG:
                         self.move(a, -ux, -uy)
-                    if b.kind != 'boss':
+                    if b.kind not in BIG:
                         self.move(b, ux, uy)
 
     def update_bullets(self):
@@ -1634,7 +1815,7 @@ class Game:
             else:
                 hit = None
                 for e in self.enemies:
-                    if e.dead or e.hidden or (b.hits is not None and e.id in b.hits):
+                    if e.dead or e.hidden or (b.hits is not None and rid(e) in b.hits):
                         continue
                     if abs(e.x - b.x) < e.r + b.r and abs(e.y - b.y) < e.r + b.r:
                         hit = e
@@ -1649,7 +1830,7 @@ class Game:
                         p.hp += 1
                         self.toast('+1 HP', BLOOD)
                     if b.hits is not None:
-                        b.hits.add(hit.id)
+                        b.hits.add(rid(hit))
                     else:
                         continue
             keep.append(b)
@@ -1669,9 +1850,9 @@ class Game:
                     self.hurt_player(dmg)
             else:
                 for e in self.enemies:
-                    if e.id not in hit and not e.dead and \
+                    if rid(e) not in hit and not e.dead and \
                             abs(math.hypot(e.x - x, e.y - y) - r) < e.r + 3:
-                        hit.add(e.id)
+                        hit.add(rid(e))
                         a = math.atan2(e.y - y, e.x - x)
                         self.hurt_enemy(e, dmg, math.cos(a) * kb, math.sin(a) * kb)
                 if breaks:
@@ -2068,6 +2249,11 @@ class Game:
                 for i in range(1, n):
                     s.set_at((int(hx + c * i - ox), int(hy + sn * i - oy)), BONE)
             pygame.draw.circle(s, BONE, (int(hx - ox), int(hy - oy)), 1 + int(prog * 3))
+        for e in self.enemies:
+            if e.kind == 'wyrm' and e.phase == 'burrow' and 10 < e.pt <= 40 and fr % 4 < 3:
+                rr = 6 + (40 - e.pt) // 3
+                pygame.draw.circle(s, BLOOD, (int(e.x - ox), int(e.y - oy)), rr, 1)
+                pygame.draw.circle(s, BLOOD, (int(e.x - ox), int(e.y - oy)), 22, 1)
         for w in self.waves:
             if w[5]:
                 pygame.draw.circle(s, BLOOD, (int(w[0] - ox), int(w[1] - oy)), int(w[2]), 2)
@@ -2138,7 +2324,7 @@ class Game:
             draw_text(s, f'{len(self.enemies)} REMAIN', W - 4, 20, align='r', color=BLOOD)
         b = self.boss
         if b and not b.dead:
-            draw_text(s, 'THE HOLLOW KING', W // 2, 6, align='c', color=BLOOD)
+            draw_text(s, BOSS_NAMES[b.kind], W // 2, 6, align='c', color=BLOOD)
             pygame.draw.rect(s, BONE, (W // 2 - 80, 13, 160, 6), 1)
             s.fill(BLOOD, (W // 2 - 78, 15, int(156 * max(0, b.hp) / b.maxhp), 2))
 
