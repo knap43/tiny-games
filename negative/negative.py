@@ -658,28 +658,36 @@ class Game:
 
     # ---------------------------------------------------------- helpers
     def move(self, e, dx, dy):
+        """Move with wall collision, in steps no longer than a few pixels so nothing can
+        tunnel through a wall however hard it is shoved. A blocked axis slides flush against
+        the wall, and never ends up further inside a wall than where it started."""
         lvl, r = self.level, e.r
         hx = hy = False
-        if dx:
-            e.x += dx
-            if lvl.box_hits(e.x, e.y, r):
-                hx = True
-                if dx > 0:
-                    e.x = ((e.x + r) // T) * T - r - 0.01
+        steps = int(max(abs(dx), abs(dy)) / 4) + 1
+        sx, sy = dx / steps, dy / steps
+        for _ in range(steps):
+            if sx:
+                nx = e.x + sx
+                if lvl.box_hits(nx, e.y, r):
+                    hx = True
+                    snap = ((nx + r) // T) * T - r - 0.01 if sx > 0 else ((nx - r) // T + 1) * T + r + 0.01
+                    if (snap - e.x) * sx > 0 and not lvl.box_hits(snap, e.y, r):
+                        e.x = snap
+                    sx = 0
                 else:
-                    e.x = ((e.x - r) // T + 1) * T + r + 0.01
-                if lvl.box_hits(e.x, e.y, r):
-                    e.x -= dx
-        if dy:
-            e.y += dy
-            if lvl.box_hits(e.x, e.y, r):
-                hy = True
-                if dy > 0:
-                    e.y = ((e.y + r) // T) * T - r - 0.01
+                    e.x = nx
+            if sy:
+                ny = e.y + sy
+                if lvl.box_hits(e.x, ny, r):
+                    hy = True
+                    snap = ((ny + r) // T) * T - r - 0.01 if sy > 0 else ((ny - r) // T + 1) * T + r + 0.01
+                    if (snap - e.y) * sy > 0 and not lvl.box_hits(e.x, snap, r):
+                        e.y = snap
+                    sy = 0
                 else:
-                    e.y = ((e.y - r) // T + 1) * T + r + 0.01
-                if lvl.box_hits(e.x, e.y, r):
-                    e.y -= dy
+                    e.y = ny
+            if not sx and not sy:
+                break
         return hx, hy
 
     def burst(self, x, y, n, spd=2.0, life=20, size=1):
