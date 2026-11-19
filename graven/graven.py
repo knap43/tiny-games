@@ -213,6 +213,7 @@ EYES = {'ghoul': [(1, -3), (3, -3)], 'cultist': [(0, -3), (2, -3)], 'bat': [(-1,
         'boss': [(-2, -7), (2, -7)], 'wyrm': [(3, -3), (5, -3)], 'wyrmseg': []}
 BOSS_NAMES = {'boss': 'THE HOLLOW KING', 'wyrm': 'THE OSSUARY WYRM'}
 BIG = ('boss', 'wyrm', 'wyrmseg')   # not shoved around by crowding or knockback
+SPEAR_THRUST = (2, 9, 13, 13, 11, 8, 4, 1)  # spear extension (px) per swing frame
 WYRM_SEGS, WYRM_GAP = 10, 5           # body segments; trail frames between them
 
 
@@ -1026,8 +1027,13 @@ class Game:
             if d > rng + e.r:
                 continue
             # the enemy's whole body counts, not just its centre
-            half = arc / 2 + math.asin(min(1.0, e.r / max(d, 0.01)))
-            if (abs(angdiff(math.atan2(dy, dx), p.swing_aim)) <= half or d < e.r + p.r + 3) \
+            if p.melee == 'spear':
+                along = dx * c + dy * s                  # distance along the thrust
+                inside = -e.r < along < rng + e.r and abs(-dx * s + dy * c) < e.r + 5
+            else:
+                half = arc / 2 + math.asin(min(1.0, e.r / max(d, 0.01)))
+                inside = abs(angdiff(math.atan2(dy, dx), p.swing_aim)) <= half
+            if (inside or d < e.r + p.r + 3) \
                     and self.reachable(e.x, e.y, e.r):
                 p.swing_hit.add(rid(e))
                 dmg = m['dmg'] * p.mdmg * (2 if p.finisher else 1)
@@ -2102,18 +2108,42 @@ class Game:
             else:
                 wa = p.aim + 0.9 * face
             hand = (x + face * 4, y - 1)
+            if p.melee == 'spear' and p.swing_t > 0:
+                wa = p.swing_aim
+                ext = SPEAR_THRUST[8 - p.swing_t]
+                arm = hand
+                hand = (hand[0] + math.cos(wa) * ext, hand[1] + math.sin(wa) * ext)
             wimg = self.weapon_img(p.melee, wa)
             wpos = (hand[0] - wimg.get_width() // 2, hand[1] - wimg.get_height() // 2)
             behind = math.sin(wa) < -0.2
             if behind:
                 s.blit(wimg, wpos)
             img = self.knight[face][int(p.walk / 5) % 4 if p.moving else 0]
+            reach_arm = p.melee == 'spear' and p.swing_t > 0 and SPEAR_THRUST[8 - p.swing_t] > 3
             if p.roll_t > 0:
                 img = pygame.transform.rotate(img, -face * p.roll_t * 26)
             s.blit(img, (x - img.get_width() // 2, y - img.get_height() // 2 - 3))
+            if reach_arm:  # the arm extends with the thrust
+                pygame.draw.line(s, BONE, arm, hand, 2)
             if not behind:
                 s.blit(wimg, wpos)
-            if p.swing_t > 2:
+            if p.swing_t > 2 and p.melee == 'spear':
+                rng = m['range'] * p.reach
+                c, sn = math.cos(p.swing_aim), math.sin(p.swing_aim)
+                t = 8 - p.swing_t
+
+                def at(dist, side):
+                    return (x + c * dist - sn * side, y + sn * dist + c * side)
+                if t < 3:  # a thin glint driven out ahead of the spearhead, with speed lines
+                    far = rng + 2 + t
+                    near = rng * 0.55
+                    pygame.draw.polygon(s, BONE, [at(near, -1.5), at(far, 0), at(near, 1.5)])
+                    for side in (-4, 4):
+                        pygame.draw.line(s, BONE, at(near - 4 + t * 2, side),
+                                         at(near + 6 + t * 2, side))
+                elif t == 3:
+                    pygame.draw.line(s, BONE, at(rng * 0.7, 0), at(rng + 4, 0))
+            elif p.swing_t > 2:
                 rng = m['range'] * p.reach
                 a0 = p.swing_aim - p.swing_side * p.swing_arc / 2
                 prog = min(1.0, (8 - p.swing_t) / 3)
