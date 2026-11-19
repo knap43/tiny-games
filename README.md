@@ -6,3 +6,5 @@ Small single-file pygame games. Each runs with nothing but `pygame` (`pacman -S 
 |---|---|---|
 | [NEGATIVE](negative/) | `python negative/negative.py` | 1-bit top-down roguelike shooter |
 | [GRAVEN](graven/) | `python graven/graven.py` | dark-fantasy top-down roguelike: melee, spells, torchlight |
+
+Both games start fullscreen; F11 toggles a window, and `--windowed` starts in one.

@@ -2,7 +2,7 @@
 """NEGATIVE - a tiny 1-bit top-down roguelike shooter.
 
 WASD move · mouse aim · LMB fire · RMB/SPACE roll · E pick up · Q/wheel swap
-ESC pause · F11 fullscreen
+ESC pause · F11 fullscreen/window (--windowed starts in a window)
 """
 import array
 import math
@@ -575,7 +575,13 @@ class Bullet:
 class Game:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((W, H), pygame.SCALED)
+        flags = pygame.SCALED
+        if '--windowed' not in sys.argv:
+            flags |= pygame.FULLSCREEN
+        try:
+            self.screen = pygame.display.set_mode((W, H), flags)
+        except pygame.error:  # no fullscreen available: fall back to a window
+            self.screen = pygame.display.set_mode((W, H), pygame.SCALED)
         pygame.display.set_caption('NEGATIVE')
         pygame.mouse.set_visible(False)
         self.clock = pygame.time.Clock()
