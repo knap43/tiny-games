@@ -286,23 +286,31 @@ def make_sprites():
     return S
 
 
-def light_stamp(r, inner=0.4):
-    """Alpha mask: transparent (lit) pixels dithered with a Bayer matrix toward the edge."""
+def light_stamps(r, inner=0.4):
+    """Alpha masks for one light radius: transparent = lit. The edge is dithered with a Bayer
+    matrix; one variant per 4x4 phase so the pattern can stay fixed to the world while the
+    light moves pixel by pixel (no shimmer, no snapping)."""
     size = 2 * r
-    s = pygame.Surface((size, size), pygame.SRCALPHA)
-    s.fill((255, 255, 255, 255))
-    lit = (255, 255, 255, 0)
+    ring = []
     for y in range(size):
         dy = y - r + 0.5
-        row = BAYER[y % 4]
         for x in range(size):
             dx = x - r + 0.5
             d = math.sqrt(dx * dx + dy * dy) / r
-            if d >= 1:
-                continue
-            if d < inner or (d - inner) / (1 - inner) * 16 < row[x % 4] + 0.5:
-                s.set_at((x, y), lit)
-    return s
+            if inner <= d < 1:
+                ring.append((x, y, (d - inner) / (1 - inner) * 16))
+    lit = (255, 255, 255, 0)
+    variants = {}
+    for py in range(4):
+        for px in range(4):
+            s = pygame.Surface((size, size), pygame.SRCALPHA)
+            s.fill((255, 255, 255, 255))
+            pygame.draw.circle(s, lit, (r, r), int(r * inner) + 1)
+            for x, y, v in ring:
+                if v < BAYER[(y + py) % 4][(x + px) % 4] + 0.5:
+                    s.set_at((x, y), lit)
+            variants[(px, py)] = s
+    return variants
 
 
 def dither_surface(w, h):
@@ -605,7 +613,7 @@ class Game:
         self.spr = make_sprites()
         self.dim = dither_surface(W, H)
         self.dark = pygame.Surface((W, H), pygame.SRCALPHA)
-        self.stamps = {r: light_stamp(r) for r in (12, 20, 32, 44, 48, 52, 56, 76, 80)}
+        self.stamps = {r: light_stamps(r) for r in (12, 20, 32, 44, 48, 56, 80)}
         self.state = 'title'
         self.t = 0
         self.best_file = os.path.join(os.environ.get('XDG_DATA_HOME') or
@@ -1473,9 +1481,11 @@ class Game:
 
     # ---------------------------------------------------------- draw
     def light(self, x, y, r):
-        st = self.stamps[r]
-        self.dark.blit(st, ((int(x) - r) // 4 * 4, (int(y) - r) // 4 * 4),
-                       special_flags=pygame.BLEND_RGBA_MIN)
+        # (x, y) is in screen space; pick the dither phase from the world position so the
+        # pattern is anchored to the world, not to the light or the screen.
+        left, top = int(x) - r, int(y) - r
+        st = self.stamps[r][((left + self.lox) % 4, (top + self.loy) % 4)]
+        self.dark.blit(st, (left, top), special_flags=pygame.BLEND_RGBA_MIN)
 
     def draw_world(self):
         s = self.screen
@@ -1483,6 +1493,7 @@ class Game:
         ox = self.ox + (random.randint(-sh, sh) if sh else 0)
         oy = self.oy + (random.randint(-sh, sh) if sh else 0)
         fr = self.frame
+        self.lox, self.loy = ox, oy
         p = self.player
         s.fill(BLACK)
         s.blit(self.level.surf, (-ox, -oy))
@@ -1593,11 +1604,11 @@ class Game:
         d.fill(BLACK + (255,))
         if self.state != 'dead':
             px, py = int(p.x - ox), int(p.y - oy)
-            self.light(px, py, 80 if (fr // 7) % 5 else 76)
+            self.light(px, py, 80)
         for bx, by in self.level.braziers:
             x, y = bx - ox, by - oy
             if -56 < x < W + 56 and -56 < y < H + 56:
-                self.light(x, y, 52 if (fr // 6 + bx) % 4 else 48)
+                self.light(x, y, 48)
         if self.stairs:
             self.light(self.stairs[0] - ox, self.stairs[1] - oy, 44)
         for x, y, r in lights[:40]:
