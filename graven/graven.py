@@ -760,6 +760,7 @@ class Game:
                 self.best = int(f.read().strip() or 0)
         except (OSError, ValueError):
             pass
+        self.show_map = True
         self.embers = [[random.uniform(0, W), random.uniform(0, H), random.uniform(0.2, 0.8)]
                        for _ in range(60)]
 
@@ -798,6 +799,11 @@ class Game:
         self.last_kill = (p.x, p.y)
         self.camx, self.camy = p.x - W / 2, p.y - H / 2
         self.snap_camera()
+        self.seen = bytearray(MW * MH)
+        self.minimap = pygame.Surface((MW, MH))
+        self.minimap.fill(BLACK)
+        self.mm_src = None
+        self.reveal()
 
         hpm = 1 + 0.12 * (n - 1)
         pool = ['ghoul'] * 4 + ['bat'] * 2
@@ -867,6 +873,29 @@ class Game:
     def add_shake(self, s):
         self.shake = max(self.shake, s)
 
+    def reveal(self):
+        """Mark floor the player can see (within light range, line of sight) on the minimap,
+        along with the walls around it."""
+        p, lvl = self.player, self.level
+        tx, ty = int(p.x // T), int(p.y // T)
+        if (tx, ty) == self.mm_src:
+            return
+        self.mm_src = (tx, ty)
+        g, seen, mm = lvl.grid, self.seen, self.minimap
+        R = 6
+        for y in range(max(1, ty - R), min(MH - 1, ty + R + 1)):
+            for x in range(max(1, tx - R), min(MW - 1, tx + R + 1)):
+                if g[y][x] or seen[y * MW + x] or (x - tx) ** 2 + (y - ty) ** 2 > R * R:
+                    continue
+                if not lvl.los(p.x, p.y, x * T + 8, y * T + 8):
+                    continue
+                seen[y * MW + x] = 1
+                for dx, dy in DIRS8:
+                    nx, ny = x + dx, y + dy
+                    if g[ny][nx] and not seen[ny * MW + nx]:
+                        seen[ny * MW + nx] = 1
+                        mm.set_at((nx, ny), BONE)
+
     def snap_camera(self):
         # Lock the integer camera to the player's integer position so the player and the
         # world move in identical 1px steps (no sub-pixel jitter).
@@ -878,6 +907,14 @@ class Game:
     def perk(self, weapon):
         p = self.player
         return p.melee == weapon and weapon in p.wperks
+
+    def reachable(self, x, y, r):
+        """Clear line from the player to the target's centre or either flank (walls block melee)."""
+        p, lvl = self.player, self.level
+        a = math.atan2(y - p.y, x - p.x) + math.pi / 2
+        ox, oy = math.cos(a) * r * 0.8, math.sin(a) * r * 0.8
+        return (lvl.los(p.x, p.y, x, y) or lvl.los(p.x, p.y, x + ox, y + oy)
+                or lvl.los(p.x, p.y, x - ox, y - oy))
 
     def strike(self):
         p = self.player
@@ -910,7 +947,10 @@ class Game:
             d = math.hypot(dx, dy)
             if d > rng + e.r:
                 continue
-            if abs(angdiff(math.atan2(dy, dx), p.aim)) <= arc / 2 or d < e.r + p.r + 3:
+            # the enemy's whole body counts, not just its centre
+            half = arc / 2 + math.asin(min(1.0, e.r / max(d, 0.01)))
+            if (abs(angdiff(math.atan2(dy, dx), p.aim)) <= half or d < e.r + p.r + 3) \
+                    and self.reachable(e.x, e.y, e.r):
                 dmg = m['dmg'] * p.mdmg * (2 if finisher else 1)
                 if self.perk('spear') and d > rng * 0.6:
                     dmg *= 2
@@ -924,7 +964,7 @@ class Game:
             if not b.enemy:
                 continue
             dx, dy = b.x - p.x, b.y - p.y
-            if math.hypot(dx, dy) < rng + 5 and \
+            if math.hypot(dx, dy) < rng + 5 and self.level.los(p.x, p.y, b.x, b.y) and \
                     abs(angdiff(math.atan2(dy, dx), p.aim)) <= arc / 2 + 0.3:
                 sp = max(3.5, math.hypot(b.vx, b.vy) * 1.4)
                 b.vx, b.vy = c * sp, s * sp
@@ -1236,6 +1276,7 @@ class Game:
         self.camx += (p.x - p.kox + ax - W / 2 - self.camx) * 0.15
         self.camy += (p.y - p.koy + ay - H / 2 - self.camy) * 0.15
         self.snap_camera()
+        self.reveal()
         self.shake *= 0.85
         if self.shake < 1:
             self.shake = 0
@@ -2086,6 +2127,24 @@ class Game:
             pygame.draw.rect(s, BONE, (W // 2 - 80, 13, 160, 6), 1)
             s.fill(BLOOD, (W // 2 - 78, 15, int(156 * max(0, b.hp) / b.maxhp), 2))
 
+    def draw_minimap(self):
+        if not self.show_map:
+            return
+        s, p = self.screen, self.player
+        x0, y0 = W - MW - 3, H - MH - 3
+        s.fill(BLACK, (x0 - 2, y0 - 2, MW + 4, MH + 4))
+        pygame.draw.rect(s, BONE, (x0 - 2, y0 - 2, MW + 4, MH + 4), 1)
+        s.blit(self.minimap, (x0, y0))
+        for bx, by in self.level.braziers:
+            tx, ty = int(bx // T), int(by // T)
+            if self.seen[ty * MW + tx]:
+                s.set_at((x0 + tx, y0 + ty), BLOOD)
+        if self.stairs and (self.frame // 15) % 2:
+            s.fill(BONE, (x0 + int(self.stairs[0] // T) - 1, y0 + int(self.stairs[1] // T) - 1, 3, 3))
+        if (self.frame // 10) % 3:
+            s.fill(BLOOD, (x0 + int(p.x // T) - 1, y0 + int(p.y // T) - 1, 3, 3))
+        s.set_at((x0 + int(p.x // T), y0 + int(p.y // T)), BONE)
+
     def draw_cursor(self):
         mx, my = pygame.mouse.get_pos()
         s = self.screen
@@ -2107,7 +2166,7 @@ class Game:
         draw_text(s, 'GRAVEN', W // 2, 34, 6, 'c')
         draw_text(s, 'DESCEND.', W // 2, 70, 1, 'c', BLOOD)
         lines = ['WASD  MOVE', 'MOUSE  AIM', 'LMB  STRIKE  (DEFLECTS BOLTS)', 'RMB  CAST',
-                 'SPACE / SHIFT  ROLL', 'F  DRINK VIAL    E  TAKE ITEM',
+                 'SPACE / SHIFT  ROLL', 'F  DRINK VIAL    E  TAKE ITEM    M  MAP',
                  'ESC  PAUSE    F11  FULLSCREEN']
         for i, l in enumerate(lines):
             draw_text(s, l, W // 2, 92 + i * 9, 1, 'c')
@@ -2161,6 +2220,7 @@ class Game:
         else:
             self.draw_world()
             self.draw_hud()
+            self.draw_minimap()
             if self.state == 'pause':
                 s.blit(self.dim, (0, 0))
                 draw_text(s, 'PAUSED', W // 2, 70, 3, 'c')
@@ -2213,6 +2273,8 @@ class Game:
                 self.state = 'pause'
             elif key == pygame.K_e:
                 self.interact()
+            elif key == pygame.K_m:
+                self.show_map = not self.show_map
             elif key == pygame.K_f:
                 self.drink()
         elif st == 'pause':
