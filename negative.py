@@ -505,6 +505,7 @@ class Player:
         self.weapons = ['revolver', None]
         self.ammo = {'bullet': 96, 'shell': 0, 'explo': 0, 'energy': 0}
         self.vx = self.vy = self.kx = self.ky = 0.0
+        self.wkx = self.wky = self.kox = self.koy = 0.0  # weapon kick + its camera offset
         self.cd = self.burst_left = self.burst_t = 0
         self.iframes = self.roll_t = self.roll_cd = 0
         self.rdx = self.rdy = 0.0
@@ -613,6 +614,7 @@ class Game:
         p = self.player
         p.x, p.y = lvl.start[0] * T + 8, lvl.start[1] * T + 8
         p.vx = p.vy = p.kx = p.ky = 0
+        p.wkx = p.wky = p.kox = p.koy = 0
         p.iframes = 60
         self.enemies, self.bullets, self.pickups = [], [], []
         self.particles, self.effects, self.corpses, self.texts = [], [], [], []
@@ -733,8 +735,8 @@ class Game:
                 self.particles.append([p.x, p.y, math.cos(a) * 1.5, math.sin(a) * 1.5,
                                        160, 1, 0.85])
         self.effects.append(['flash', tipx, tipy, 0, 0, 0, 3])
-        p.kx -= math.cos(p.aim) * g['kick']
-        p.ky -= math.sin(p.aim) * g['kick']
+        p.wkx -= math.cos(p.aim) * g['kick'] * 0.5
+        p.wky -= math.sin(p.aim) * g['kick'] * 0.5
         p.recoil = 3
         self.add_shake(g['shake'])
         self.sfx.play(g['snd'])
@@ -905,8 +907,8 @@ class Game:
         # camera
         ax = clamp((mx - W / 2) * 0.3, -50, 50)
         ay = clamp((my - H / 2) * 0.3, -35, 35)
-        self.camx += (p.x + ax - W / 2 - self.camx) * 0.15
-        self.camy += (p.y + ay - H / 2 - self.camy) * 0.15
+        self.camx += (p.x - p.kox + ax - W / 2 - self.camx) * 0.15
+        self.camy += (p.y - p.koy + ay - H / 2 - self.camy) * 0.15
         self.snap_camera()
         self.shake *= 0.85
         if self.shake < 1:
@@ -957,7 +959,19 @@ class Game:
             p.vx += (ix * spd - p.vx) * 0.35
             p.vy += (iy * spd - p.vy) * 0.35
             dx, dy = p.vx, p.vy
-        self.move(p, dx + p.kx, dy + p.ky)
+        x0, y0 = p.x, p.y
+        self.move(p, dx + p.kx + p.wkx, dy + p.ky + p.wky)
+        # Credit the weapon-kick share of the actual movement to the camera offset, so the
+        # camera ignores it and only drifts back to the player gently.
+        tot_x, tot_y = dx + p.kx + p.wkx, dy + p.ky + p.wky
+        if tot_x:
+            p.kox += (p.x - x0) * p.wkx / tot_x if abs(p.wkx) < abs(tot_x) else p.x - x0
+        if tot_y:
+            p.koy += (p.y - y0) * p.wky / tot_y if abs(p.wky) < abs(tot_y) else p.y - y0
+        p.kox *= 0.9
+        p.koy *= 0.9
+        p.wkx *= 0.6
+        p.wky *= 0.6
         p.kx *= 0.6
         p.ky *= 0.6
 
