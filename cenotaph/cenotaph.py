@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """CENOTAPH - a tiny dark-fantasy turn-based tactical roguelike.
 
-Moving is attacking: step between two tiles next to a foe to STAB it; step straight at a foe
+No diagonals, for anyone. Step into a foe next to you to STRIKE it; step straight at a foe
 two tiles away to LUNGE (spear in hand). 1 LEAP · 2 THROW SPEAR · 3 BASH (or click / right click)
-WASD/arrows + Q E Z C diagonals (or numpad) move · SPACE wait · ESC pause · F11 fullscreen
+WASD/arrows (or numpad) move · SPACE wait · ESC pause · F11 fullscreen
 """
 import array
 import math
@@ -97,8 +97,13 @@ def wrap(s, width):
     return lines
 
 
-def cheb(ax, ay, bx, by):
-    return max(abs(ax - bx), abs(ay - by))
+def man(ax, ay, bx, by):
+    """Steps between two tiles when only straight moves exist."""
+    return abs(ax - bx) + abs(ay - by)
+
+
+def aligned(ax, ay, bx, by):
+    return ax == bx or ay == by
 
 
 def sign(v):
@@ -165,17 +170,17 @@ class Sfx:
 # ------------------------------------------------------------------ data
 ENEMIES = {
     'ghoul': dict(name='GHOUL', hp=1, depth=1, weight=10,
-                  desc='STRIKES ANY TILE NEXT TO IT.'),
+                  desc='STRIKES THE FOUR TILES NEXT TO IT.'),
     'archer': dict(name='BONE ARCHER', hp=1, depth=2, weight=6,
-                   desc='SHOOTS ALONG ROWS, COLUMNS AND DIAGONALS, 2 TO 5 TILES AWAY. '
+                   desc='SHOOTS ALONG ROWS AND COLUMNS, 2 TO 5 TILES AWAY. '
                         'CANNOT SHOOT POINT-BLANK.'),
     'cultist': dict(name='CULTIST', hp=1, depth=4, weight=4,
                     desc='HEXES ALONG ROWS AND COLUMNS, UP TO 7 TILES. RESTS A TURN AFTER.'),
     'bomber': dict(name='GRAVE-ROBBER', hp=1, depth=6, weight=3,
-                   desc='LOBS A BOMB AT YOU FROM 2-4 TILES. IT BURSTS NEXT TURN, 3X3, '
+                   desc='LOBS A BOMB AT YOU FROM 2-4 STEPS AWAY. IT BURSTS NEXT TURN IN A CROSS, '
                         'HURTING ANYONE CAUGHT.'),
     'revenant': dict(name='REVENANT', hp=2, depth=8, weight=3,
-                     desc='TAKES TWO WOUNDS. STRIKES ANY TILE NEXT TO IT. '
+                     desc='TAKES TWO WOUNDS. STRIKES THE FOUR TILES NEXT TO IT. '
                           'MOVES ONLY EVERY OTHER TURN.'),
 }
 
@@ -198,8 +203,6 @@ MOVE_KEYS = {
     pygame.K_a: (-1, 0), pygame.K_LEFT: (-1, 0), pygame.K_KP4: (-1, 0),
     pygame.K_w: (0, -1), pygame.K_UP: (0, -1), pygame.K_KP8: (0, -1),
     pygame.K_s: (0, 1), pygame.K_DOWN: (0, 1), pygame.K_KP2: (0, 1), pygame.K_x: (0, 1),
-    pygame.K_q: (-1, -1), pygame.K_KP7: (-1, -1), pygame.K_e: (1, -1), pygame.K_KP9: (1, -1),
-    pygame.K_z: (-1, 1), pygame.K_KP1: (-1, 1), pygame.K_c: (1, 1), pygame.K_KP3: (1, 1),
 }
 
 
@@ -387,7 +390,7 @@ class Level:
         q = deque([(x, y)])
         while q:
             cx, cy = q.popleft()
-            for dx, dy in DIR8:
+            for dx, dy in DIRS:
                 nx, ny = cx + dx, cy + dy
                 if (nx, ny) not in out and 0 <= nx < GW and 0 <= ny < GH and \
                         self.t[ny][nx] in (FLOOR, STAIRS):
@@ -400,7 +403,7 @@ class Level:
         q = deque([(x, y)])
         while q:
             cx, cy = q.popleft()
-            for dx, dy in DIR8:
+            for dx, dy in DIRS:
                 nx, ny = cx + dx, cy + dy
                 if (nx, ny) not in dist and self.walkable(nx, ny) and (nx, ny) not in blocked:
                     dist[(nx, ny)] = dist[(cx, cy)] + 1
@@ -568,12 +571,12 @@ class Game:
         if e.dead or not self.ready(e):
             return False
         dx, dy = tx - e.x, ty - e.y
-        d = cheb(e.x, e.y, tx, ty)
+        d = man(e.x, e.y, tx, ty)
         k = e.kind
         if k in ('ghoul', 'revenant'):
             return d == 1
         if k == 'archer':
-            return (dx == 0 or dy == 0 or abs(dx) == abs(dy)) and 2 <= d <= 5 \
+            return (dx == 0 or dy == 0) and 2 <= d <= 5 \
                 and self.clear_line(e.x, e.y, tx, ty, 'player')
         if k == 'cultist':
             return (dx == 0 or dy == 0) and 1 <= d <= 7 and self.clear_line(e.x, e.y, tx, ty, 'player')
@@ -589,9 +592,9 @@ class Game:
                         self.threat[(x, y)] = who
         self.blast = set()
         for b in self.bombs:
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    self.blast.add((b[0] + dx, b[1] + dy))
+            self.blast.add((b[0], b[1]))
+            for dx, dy in DIRS:
+                self.blast.add((b[0] + dx, b[1] + dy))
 
     def burst(self, x, y, n, spd=2.0, life=20, color=BONE):
         for _ in range(n):
@@ -633,11 +636,19 @@ class Game:
     def try_move(self, dx, dy):
         p = self.player
         nx, ny = p.x + dx, p.y + dy
+        e = self.enemy_at(nx, ny)
+        if e:                                                 # bump to strike
+            self.begin_turn()
+            if dx:
+                p.face = dx
+            self.slash(e)
+            self.wound(e, 'YOU STRIKE')
+            self.end_player_turn()
+            return
         if not self.free(nx, ny):
             self.sfx.play('no')
             return
         self.begin_turn()
-        ox, oy = p.x, p.y
         p.x, p.y = nx, ny
         if dx:
             p.face = dx
@@ -647,15 +658,7 @@ class Game:
             if e:
                 self.slash(e)
                 self.wound(e, 'YOU LUNGE AT')
-        self.stab(ox, oy)
         self.end_player_turn()
-
-    def stab(self, ox, oy):
-        p = self.player
-        for e in self.enemies:
-            if not e.dead and cheb(e.x, e.y, ox, oy) == 1 and cheb(e.x, e.y, p.x, p.y) == 1:
-                self.slash(e)
-                self.wound(e, 'YOU STAB')
 
     def slash(self, e):
         self.effects.append(['slash', e.x, e.y, 0, 10])
@@ -666,14 +669,15 @@ class Game:
         if p.leap_cd:
             return set()
         return {(x, y) for y in range(GH) for x in range(GW)
-                if 1 <= cheb(p.x, p.y, x, y) <= p.leap_range and self.free(x, y)}
+                if aligned(p.x, p.y, x, y) and 1 <= man(p.x, p.y, x, y) <= p.leap_range
+                and self.free(x, y)}
 
     def throw_targets(self):
         p = self.player
         if not p.spear:
             return set()
         out = set()
-        for dx, dy in DIR8:
+        for dx, dy in DIRS:
             for k in range(1, p.throw_range + 1):
                 x, y = p.x + dx * k, p.y + dy * k
                 if self.level.tile(x, y) == WALL:
@@ -687,7 +691,7 @@ class Game:
         p = self.player
         if p.bash_cd:
             return set()
-        return {(p.x + dx, p.y + dy) for dx, dy in DIR8 if self.enemy_at(p.x + dx, p.y + dy)}
+        return {(p.x + dx, p.y + dy) for dx, dy in DIRS if self.enemy_at(p.x + dx, p.y + dy)}
 
     def targets(self, mode):
         return {'leap': self.leap_targets, 'throw': self.throw_targets,
@@ -699,17 +703,15 @@ class Game:
             self.sfx.play('no')
             return
         self.begin_turn()
-        ox, oy = p.x, p.y
+        if x != p.x:
+            p.face = sign(x - p.x)
         p.x, p.y = x, y
-        if x != ox:
-            p.face = sign(x - ox)
         p.leap_cd = p.leap_max
         self.sfx.play('leap')
         self.burst(*self.center(x, y), 10, 1.5, 16, BONE)
-        self.stab(ox, oy)
         if 'SHOCKWAVE' in p.boons:
             for e in self.enemies:
-                if not e.dead and cheb(e.x, e.y, x, y) == 1:
+                if not e.dead and man(e.x, e.y, x, y) == 1:
                     e.stun = max(e.stun, 1)
             self.effects.append(['ring', x, y, 0, 14])
         self.end_player_turn()
@@ -869,7 +871,7 @@ class Game:
                 self.effects.append(['claw', p.x, p.y, 0, 10])
             self.hurt_player(f'THE {name}')
             return True
-        if k == 'bomber' and e.cool == 0 and 2 <= cheb(e.x, e.y, p.x, p.y) <= 4:
+        if k == 'bomber' and e.cool == 0 and 2 <= man(e.x, e.y, p.x, p.y) <= 4:
             self.bombs.append([p.x, p.y, 1])
             self.effects.append(['lob', e.x, e.y, p.x, p.y, 0, 12])
             self.sfx.play('fuse')
@@ -884,10 +886,10 @@ class Game:
         self.shake = 5
         self.effects.append(['boom', x, y, 0, 16])
         self.burst(*self.center(x, y), 24, 3, 26, BLOOD)
-        if cheb(x, y, p.x, p.y) <= 1:
+        if man(x, y, p.x, p.y) <= 1:
             self.hurt_player('THE BLAST')
         for e in self.enemies:
-            if not e.dead and cheb(x, y, e.x, e.y) <= 1:
+            if not e.dead and man(x, y, e.x, e.y) <= 1:
                 self.wound(e, 'THE BLAST TEARS')
 
     def enemy_move(self, e, dist):
@@ -897,7 +899,7 @@ class Game:
             e.slow_t ^= 1
             if e.slow_t:
                 return
-        opts = [(e.x + dx, e.y + dy) for dx, dy in DIR8 if self.free(e.x + dx, e.y + dy)]
+        opts = [(e.x + dx, e.y + dy) for dx, dy in DIRS if self.free(e.x + dx, e.y + dy)]
         if not opts:
             return
         here = dist.get((e.x, e.y), 99)
@@ -915,7 +917,7 @@ class Game:
                 cool = e.cool
                 e.cool = 0
                 if k == 'bomber':
-                    good = 2 <= cheb(q[0], q[1], p.x, p.y) <= 4
+                    good = 2 <= man(q[0], q[1], p.x, p.y) <= 4
                 else:
                     good = self.threatens(e, p.x, p.y)
                 e.x, e.y, e.cool = ox, oy, cool
@@ -1072,9 +1074,10 @@ class Game:
             if strong:
                 pygame.draw.rect(s, BLOOD, (sx + 1, sy + 1, TS - 2, TS - 2), 1)
         for b in self.bombs:
-            sx, sy = GX + (b[0] - 1) * TS + ox, GY + (b[1] - 1) * TS + oy
             if self.t % 20 < 14:
-                pygame.draw.rect(s, BLOOD, (sx + 1, sy + 1, TS * 3 - 2, TS * 3 - 2), 1)
+                for dx, dy in [(0, 0)] + DIRS:
+                    sx, sy = GX + (b[0] + dx) * TS + ox, GY + (b[1] + dy) * TS + oy
+                    pygame.draw.rect(s, BLOOD, (sx + 1, sy + 1, TS - 2, TS - 2), 1)
             cx, cy = self.center(b[0], b[1])
             pygame.draw.circle(s, BLOOD, (cx + ox, cy + oy + 1), 4)
             pygame.draw.circle(s, BONE, (cx + ox, cy + oy + 1), 4, 1)
@@ -1153,7 +1156,8 @@ class Game:
             elif k == 'boom':
                 cx, cy = self.center(f[1], f[2])
                 if t < 4:
-                    s.fill(BONE, (cx - TS * 3 // 2 + ox, cy - TS * 3 // 2 + oy, TS * 3, TS * 3))
+                    s.fill(BONE, (cx - TS * 3 // 2 + ox, cy - TS // 2 + oy, TS * 3, TS))
+                    s.fill(BONE, (cx - TS // 2 + ox, cy - TS * 3 // 2 + oy, TS, TS * 3))
                 else:
                     r = int(10 + t * 1.5)
                     pygame.draw.circle(s, BLOOD, (cx + ox, cy + oy), r, 2)
@@ -1193,7 +1197,7 @@ class Game:
         hover = self.tile_at_mouse()
         if self.mode:
             info = [{'leap': 'LEAP', 'throw': 'THROW SPEAR', 'bash': 'BASH'}[self.mode],
-                    {'leap': f'JUMP TO A FREE TILE UP TO {p.leap_range} AWAY. STABS STILL COUNT.',
+                    {'leap': f'JUMP STRAIGHT UP TO {p.leap_range} TILES, OVER ANYTHING, TO A FREE TILE.',
                      'throw': f'KILLS THE FIRST FOE IN A STRAIGHT LINE, UP TO {p.throw_range} TILES. '
                               'WALK OVER THE SPEAR TO TAKE IT BACK.',
                      'bash': 'SHOVE A FOE NEXT TO YOU AWAY AND STUN IT. INTO A CHASM, IT FALLS.'}[self.mode],
@@ -1207,8 +1211,8 @@ class Game:
                 if e.stun:
                     info.append('STUNNED.')
             elif hover == (p.x, p.y):
-                info = ['YOU', 'STEP BETWEEN TWO TILES NEXT TO A FOE TO STAB IT. STEP STRAIGHT AT A FOE '
-                        'TWO TILES AWAY TO LUNGE.']
+                info = ['YOU', 'STEP INTO A FOE NEXT TO YOU TO STRIKE IT. STEP STRAIGHT AT A FOE '
+                        'TWO TILES AWAY TO LUNGE. NO ONE MOVES DIAGONALLY.']
             elif hover == self.spear_at:
                 info = ['YOUR SPEAR', 'WALK OVER IT TO TAKE IT BACK.']
             elif t == STAIRS:
@@ -1231,8 +1235,8 @@ class Game:
             for line in wrap(', '.join(p.boons), 36)[:4]:
                 draw_text(s, line, x, yy, 1, 'l', BONE, False)
                 yy += 7
-        draw_text(s, 'WASD QEZC MOVE  SPACE WAIT', x, H - 16, 1, 'l', BONE, False)
-        draw_text(s, 'CLICK LEAP/BASH  RCLICK THROW', x, H - 9, 1, 'l', BONE, False)
+        draw_text(s, 'WASD MOVE  SPACE WAIT', x, H - 16, 1, 'l', BONE, False)
+        draw_text(s, '3 BASH  RIGHT CLICK THROW', x, H - 9, 1, 'l', BONE, False)
         recent = self.log[-2:]
         for i, (msg, life) in enumerate(recent):
             if life > 0:
@@ -1275,13 +1279,13 @@ class Game:
         draw_text(s, 'CENOTAPH', W // 2, 20, 5, 'c')
         draw_text(s, f'DESCEND {LAST_DEPTH} DEPTHS. TAKE THE HEART.', W // 2, 50, 1, 'c', BLOOD)
         lines = ['EVERY MOVE IS AN ATTACK:',
-                 'STEP BETWEEN TWO TILES NEXT TO A FOE TO STAB IT',
+                 'STEP INTO A FOE NEXT TO YOU TO STRIKE IT',
                  'STEP STRAIGHT AT A FOE TWO TILES AWAY TO LUNGE',
                  '1 LEAP   2 THROW SPEAR   3 BASH (INTO CHASMS!)',
                  'RED MARKS SHOW WHERE FOES WILL STRIKE NEXT TURN',
                  'HOVER A FOE TO SEE ITS REACH',
-                 'WASD/ARROWS + Q E Z C DIAGONALS, OR NUMPAD.  SPACE WAITS',
-                 'MOUSE: CLICK TO MOVE OR LEAP OR BASH, RIGHT CLICK TO THROW']
+                 'WASD/ARROWS OR NUMPAD. NO ONE MOVES DIAGONALLY. SPACE WAITS',
+                 'MOUSE: CLICK TO MOVE, STRIKE OR LEAP, RIGHT CLICK TO THROW']
         for i, l in enumerate(lines):
             draw_text(s, l, W // 2, 68 + i * 9, 1, 'c', BLOOD if i == 0 else BONE)
         if (self.t // 30) % 2:
@@ -1350,14 +1354,11 @@ class Game:
         if button == 3:
             self.throw(x, y)
             return
-        d = cheb(p.x, p.y, x, y)
+        d = man(p.x, p.y, x, y)
         if d == 0:
             self.wait()
         elif d == 1:
-            if self.enemy_at(x, y):
-                self.bash(x, y)
-            else:
-                self.try_move(x - p.x, y - p.y)
+            self.try_move(x - p.x, y - p.y)
         elif (x, y) in self.leap_targets():
             self.leap(x, y)
         else:
@@ -1446,7 +1447,7 @@ class Game:
             return
         self.mode = mode
         p = self.player
-        self.cursor = list(min(targets, key=lambda q: (cheb(p.x, p.y, *q), q)))
+        self.cursor = list(min(targets, key=lambda q: (man(p.x, p.y, *q), q)))
 
     def run(self):
         while True:
