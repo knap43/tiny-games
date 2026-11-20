@@ -518,7 +518,7 @@ class Player:
         self.steal_cd = 0
 
     def need(self):
-        return (self.lv + 3) ** 2
+        return int((self.lv + 4) ** 2 * (1 + 0.04 * self.lv))
 
 
 class Weapon:
@@ -542,9 +542,9 @@ class Enemy:
         Enemy._next += 1
         self.id = Enemy._next
         d = ENEMIES[kind]
-        hpm = 1 + 0.3 * (wave - 1) + 0.045 * (wave - 1) ** 2
+        hpm = (1 + 0.35 * (wave - 1) + 0.06 * (wave - 1) ** 2) * 1.08 ** (wave - 1)
         if kind == 'boss':
-            hpm = 1 + 0.4 * (wave - 5) + 0.03 * (wave - 5) ** 2
+            hpm = (1 + 0.5 * (wave - 5) + 0.05 * (wave - 5) ** 2) * 1.08 ** (wave - 5)
         self.kind, self.x, self.y = kind, x, y
         self.hp = self.maxhp = d['hp'] * hpm
         self.dmg = d['dmg'] * (1 + 0.2 * (wave - 1) + 0.006 * (wave - 1) ** 2)
