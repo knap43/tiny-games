@@ -9,5 +9,6 @@ Small single-file pygame games. Each runs with nothing but `pygame` (`pacman -S 
 | [VIGIL](vigil/) | `python vigil/vigil.py` | dark-fantasy wave survival: auto-weapons, souls, a shop between waves |
 | [LITANY](litany/) | `python litany/litany.py` | dark-fantasy typing game: banish the shades closing in from every side |
 | [CENOTAPH](cenotaph/) | `python cenotaph/cenotaph.py` | dark-fantasy turn-based tactical roguelike: every move is an attack |
+| [RELIQUARY](reliquary/) | `python reliquary/reliquary.py` | dark-fantasy roguelike deck builder: three acts, cards, relics |
 
 All games start fullscreen; F11 toggles a window, and `--windowed` starts in one.
