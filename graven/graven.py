@@ -2057,6 +2057,8 @@ class Game:
             i = random.choices(range(len(pool)), [w for _, w in pool])[0]
             self.boon_opts.append(pool.pop(i)[0])
         self.boon_t = 0
+        self.boon_sel = 0
+        self.boon_mouse = pygame.mouse.get_pos()
 
     def pick_boon(self, i):
         if self.boon_t < 15:
@@ -2490,15 +2492,19 @@ class Game:
         s.fill(BLACK)
         self.boon_t += 1
         draw_text(s, 'A BOON', W // 2, 20, 3, 'c', BLOOD)
-        draw_text(s, 'CHOOSE ONE  (1-4 OR CLICK)', W // 2, 42, 1, 'c')
+        draw_text(s, 'CHOOSE ONE  (A/D AND E, 1-4 OR CLICK)', W // 2, 42, 1, 'c')
         mx, my = pygame.mouse.get_pos()
+        moved = (mx, my) != self.boon_mouse   # the mouse only takes over once it moves
+        self.boon_mouse = (mx, my)
         self.boon_rects = []
         bw, bh, gap = 90, 96, 6
         x0 = (W - (bw * 4 + gap * 3)) // 2
         for i, (name, desc, _) in enumerate(self.boon_opts):
             r = pygame.Rect(x0 + i * (bw + gap), 62, bw, bh)
             self.boon_rects.append(r)
-            hover = r.collidepoint(mx, my)
+            if moved and r.collidepoint(mx, my):
+                self.boon_sel = i
+            hover = i == self.boon_sel
             col = BLACK if hover else BONE
             if hover:
                 s.fill(BONE, r)
@@ -2595,8 +2601,16 @@ class Game:
             elif key == pygame.K_x:
                 self.state = 'title'
         elif st == 'boon':
+            n = len(self.boon_opts)
             if key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
-                self.pick_boon(key - pygame.K_1)
+                if key - pygame.K_1 < n:
+                    self.pick_boon(key - pygame.K_1)
+            elif key in (pygame.K_a, pygame.K_LEFT):
+                self.boon_sel = (self.boon_sel - 1) % n
+            elif key in (pygame.K_d, pygame.K_RIGHT):
+                self.boon_sel = (self.boon_sel + 1) % n
+            elif key in (pygame.K_e, pygame.K_RETURN):
+                self.pick_boon(self.boon_sel)
             elif click:
                 for i, r in enumerate(getattr(self, 'boon_rects', [])):
                     if r.collidepoint(ev.pos):
