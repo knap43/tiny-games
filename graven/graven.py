@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GRAVEN - a tiny dark-fantasy top-down roguelike.
 
-WASD move · mouse aim · LMB strike · RMB cast · SPACE/SHIFT roll · F drink vial
+WASD move · mouse aim (Q autoaim) · LMB/[ strike · RMB/] cast · SPACE/SHIFT roll · F drink vial
 E pick up · ESC pause · F11 fullscreen/window (--windowed starts in a window)
 """
 import array
@@ -43,7 +43,7 @@ FONT = {
     '.': '000000000000010', ',': '000000000010100', ':': '000010000010000',
     '/': '001001010100100', '-': '000000111000000', '+': '000010111010000',
     '%': '101001010100101', '!': '010010010000010', '?': '110001010000010',
-    '(': '010100100100010', ')': '010001001001010', "'": '010010000000000',
+    '[': '110100100100110', ']': '011001001001011', '(': '010100100100010', ')': '010001001001010', "'": '010010000000000',
     '>': '100010001010100', '<': '001010100010001', ' ': '000000000000000',
 }
 _tcache = {}
@@ -798,6 +798,10 @@ class Game:
         except (OSError, ValueError):
             pass
         self.show_map = True
+        # autoaim is off by default; Q toggles it and the choice is remembered
+        self.autoaim_file = os.path.join(os.path.dirname(self.best_file), 'autoaim')
+        self.autoaim = os.path.exists(self.autoaim_file)
+        self.aim_target = None
         self.embers = [[random.uniform(0, W), random.uniform(0, H), random.uniform(0.2, 0.8)]
                        for _ in range(60)]
 
@@ -1337,6 +1341,29 @@ class Game:
             self.sfx.play('toll')
 
     # ---------------------------------------------------------- update
+    def find_target(self):
+        """Nearest enemy in sight, within roughly a screen of the knight."""
+        p, best, bd = self.player, None, 170.0
+        for e in self.enemies:
+            if e.dead or e.hidden:
+                continue
+            d = math.hypot(e.x - p.x, e.y - p.y)
+            if d < bd and self.level.los(p.x, p.y, e.x, e.y):
+                best, bd = e, d
+        return best
+
+    def toggle_autoaim(self):
+        self.autoaim = not self.autoaim
+        self.toast('AUTOAIM ON' if self.autoaim else 'AUTOAIM OFF')
+        try:
+            if self.autoaim:
+                os.makedirs(os.path.dirname(self.autoaim_file), exist_ok=True)
+                open(self.autoaim_file, 'w').close()
+            elif os.path.exists(self.autoaim_file):
+                os.remove(self.autoaim_file)
+        except OSError:
+            pass
+
     def update(self):
         if self.freeze > 0:
             self.freeze -= 1
@@ -1345,15 +1372,18 @@ class Game:
         p, lvl = self.player, self.level
         mx, my = pygame.mouse.get_pos()
         p.aim = math.atan2(my + self.oy - p.y, mx + self.ox - p.x)
+        self.aim_target = self.find_target() if self.autoaim else None
+        if self.aim_target:
+            p.aim = math.atan2(self.aim_target.y - p.y, self.aim_target.x - p.x)
         keys = pygame.key.get_pressed()
         mb = pygame.mouse.get_pressed()
         ix = (keys[pygame.K_d] or keys[pygame.K_RIGHT]) - (keys[pygame.K_a] or keys[pygame.K_LEFT])
         iy = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
         if self.state == 'play':
             self.update_player(ix, iy, keys[pygame.K_SPACE] or keys[pygame.K_LSHIFT])
-            if mb[0]:
+            if mb[0] or keys[pygame.K_LEFTBRACKET]:
                 self.strike()
-            if mb[2]:
+            if mb[2] or keys[pygame.K_RIGHTBRACKET]:
                 self.cast()
         lvl.update_flow(p.x, p.y)
         for e in self.enemies[:]:
@@ -2384,8 +2414,10 @@ class Game:
         draw_text(s, 'F', 6 + p.maxvials * 8, 27)
         sp = SPELLS[p.spell]
         cost = f"{sp['hpcost']} HP" if sp.get('hpcost') else str(sp['cost'])
-        draw_text(s, f'LMB {p.melee}', 4, H - 17)
-        draw_text(s, f'RMB {p.spell} ({cost})', 4, H - 9,
+        draw_text(s, f'LMB/[ {p.melee}', 4, H - 17)
+        if self.autoaim:
+            draw_text(s, 'AUTOAIM', 4, H - 25, color=BLOOD)
+        draw_text(s, f'RMB/] {p.spell} ({cost})', 4, H - 9,
                   color=BONE if sp.get('hpcost') or p.mana >= sp['cost'] else BLOOD)
         draw_text(s, self.level_name(self.n, True), W - 4, 4, align='r')
         draw_text(s, f'SLAIN {self.kills}', W - 4, 12, align='r')
@@ -2418,6 +2450,13 @@ class Game:
     def draw_cursor(self):
         mx, my = pygame.mouse.get_pos()
         s = self.screen
+        e = self.aim_target
+        if self.state == 'play' and e and not e.dead:
+            x, y, r = int(e.x - self.ox), int(e.y - self.oy), int(e.r) + 4
+            for sx, sy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+                cx, cy = x + sx * r, y + sy * r
+                pygame.draw.line(s, BLOOD, (cx, cy), (cx - sx * 3, cy))
+                pygame.draw.line(s, BLOOD, (cx, cy), (cx, cy - sy * 3))
         for col, w in ((BLACK, 3), (BONE, 1)):
             for a, b in (((mx - 5, my), (mx - 2, my)), ((mx + 2, my), (mx + 5, my)),
                          ((mx, my - 5), (mx, my - 2)), ((mx, my + 2), (mx, my + 5))):
@@ -2435,7 +2474,8 @@ class Game:
             s.set_at((int(em[0]), int(em[1])), BLOOD)
         draw_text(s, 'GRAVEN', W // 2, 34, 6, 'c')
         draw_text(s, 'DESCEND.', W // 2, 70, 1, 'c', BLOOD)
-        lines = ['WASD  MOVE', 'MOUSE  AIM', 'LMB  STRIKE  (DEFLECTS BOLTS)', 'RMB  CAST',
+        lines = ['WASD  MOVE', 'MOUSE  AIM    Q  AUTOAIM', 'LMB / [  STRIKE  (DEFLECTS BOLTS)',
+                 'RMB / ]  CAST',
                  'SPACE / SHIFT  ROLL', 'F  DRINK VIAL    E  TAKE ITEM    M  MAP',
                  'ESC  PAUSE    F11  FULLSCREEN']
         for i, l in enumerate(lines):
@@ -2545,6 +2585,8 @@ class Game:
                 self.interact()
             elif key == pygame.K_m:
                 self.show_map = not self.show_map
+            elif key == pygame.K_q:
+                self.toggle_autoaim()
             elif key == pygame.K_f:
                 self.drink()
         elif st == 'pause':
