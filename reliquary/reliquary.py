@@ -3,8 +3,9 @@
 
 Climb three acts of a ruined cathedral, fight with a deck of cards, gather relics.
 Mouse: click or drag a card onto a foe (or above the hand), right click cancels.
-Keys: 1-9/0 pick a card, A/D or arrows pick a target, ENTER/SPACE plays, E ends the turn,
-Z/X/C drink a potion, V views the deck (in combat: the draw pile), B the discard pile.
+Keys: A/D (or 1-9/0) pick a card and E chooses it; with several foes, A/D then pick the
+target and E plays. SPACE ends the turn, Q/W view the draw/discard pile, Z/X/C drink a potion,
+V views the deck outside combat.
 ESC pauses or cancels, F11 toggles fullscreen.
 """
 import array
@@ -1513,6 +1514,8 @@ class Game:
         if self.has('HOURGLASS') and self.turn % 3 == 0:
             self.energy += 1
         self.attacks_turn = 0
+        self.aiming = False
+        self.kidx = 0
         n = 5 + (2 if first and self.has('PRAYER BEADS') else 0) + (1 if self.has('GRAVE TOME') else 0)
         self.draw_cards(n)
         self.sel = None
@@ -2209,7 +2212,9 @@ class Game:
             self.handle_picker(ev)
             return
         if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
-            if self.state == 'combat' and (self.sel is not None or self.potsel is not None):
+            if self.state == 'combat' and self.aiming:
+                self.aiming = False
+            elif self.state == 'combat' and (self.sel is not None or self.potsel is not None):
                 self.sel = self.potsel = None
             else:
                 self.paused = True
@@ -2294,17 +2299,32 @@ class Game:
         alive = self.alive()
         if ev.type == pygame.KEYDOWN:
             k = ev.key
-            if k == pygame.K_e:
+            if k == pygame.K_SPACE:
                 self.end_turn()
                 return
-            if k == pygame.K_v:
+            if k == pygame.K_q:
                 self.view_pile(self.drawp, 'DRAW PILE')
                 return
-            if k == pygame.K_b:
+            if k == pygame.K_w:
                 self.view_pile(self.disc, 'DISCARD PILE')
                 return
             if k in (pygame.K_z, pygame.K_x, pygame.K_c):
                 self.select_potion({pygame.K_z: 0, pygame.K_x: 1, pygame.K_c: 2}[k])
+                return
+            d = -1 if k in (pygame.K_a, pygame.K_LEFT) else 1 if k in (pygame.K_d, pygame.K_RIGHT) else 0
+            if d:
+                if (self.aiming or self.potsel is not None) and alive:
+                    self.tsel = (self.tsel + d) % len(alive)
+                elif self.hand:
+                    if self.sel in self.hand:
+                        i = (self.hand.index(self.sel) + d) % len(self.hand)
+                    else:
+                        i = min(self.kidx, len(self.hand) - 1) if d > 0 else max(0, min(self.kidx, len(self.hand)) - 1)
+                    self.pick_card(self.hand[i])
+                self.sfx.play('click')
+                return
+            if k in (pygame.K_e, pygame.K_RETURN, pygame.K_KP_ENTER):
+                self.confirm_play()
                 return
             idx = None
             if pygame.K_1 <= k <= pygame.K_9:
@@ -2316,23 +2336,14 @@ class Game:
                 if self.sel is c:
                     self.confirm_play()
                 else:
-                    self.sel = c
-                    self.potsel = None
+                    self.pick_card(c)
                     self.sfx.play('click')
-                    if alive:
-                        self.tsel = min(self.tsel, len(alive) - 1)
-                return
-            d = self.keyboard_cycle(k, len(alive))
-            if d and k != pygame.K_e and alive:
-                self.tsel = (self.tsel + d) % len(alive)
-                return
-            if k in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                self.confirm_play()
             return
         if ev.type == pygame.MOUSEBUTTONDOWN:
             if ev.button == 3:
                 self.sel = self.potsel = None
                 self.drag = None
+                self.aiming = False
                 return
             if ev.button != 1:
                 return
@@ -2348,8 +2359,7 @@ class Game:
             hov = self.hand_hover()
             if hov is not None:
                 c = self.hand[hov]
-                self.sel = c
-                self.potsel = None
+                self.pick_card(c)
                 self.drag = (c, ev.pos)
                 self.sfx.play('click')
                 return
@@ -2383,10 +2393,33 @@ class Game:
             if alive:
                 self.use_potion(self.potsel, alive[self.tsel % len(alive)])
             return
-        if self.sel is None:
+        if self.sel is None or self.sel not in self.hand:
+            if self.hand:
+                self.pick_card(self.hand[min(self.kidx, len(self.hand) - 1)])
             return
-        t = alive[self.tsel % len(alive)] if alive and self.needs_target(self.sel) else None
-        self.play_card(self.sel, t)
+        c = self.sel
+        if self.needs_target(c) and len(alive) > 1 and not self.aiming:
+            if not self.playable(c):
+                self.play_card(c)   # explains why not
+                return
+            self.aiming = True
+            self.tsel = min(self.tsel, len(alive) - 1)
+            self.sfx.play('click')
+            return
+        t = alive[self.tsel % len(alive)] if alive and self.needs_target(c) else None
+        i = self.hand.index(c)
+        if self.play_card(c, t):
+            self.kidx = i
+        self.aiming = False
+
+    def pick_card(self, c):
+        self.sel = c
+        self.potsel = None
+        self.aiming = False
+        self.kidx = self.hand.index(c)
+        a = self.alive()
+        if a:
+            self.tsel = min(self.tsel, len(a) - 1)
 
     def handle_reward(self, ev):
         n = len(self.reward_cards)
@@ -2520,7 +2553,7 @@ class Game:
         n = len(pk['cards'])
         if ev.type == pygame.KEYDOWN:
             k = ev.key
-            if k == pygame.K_ESCAPE or (pk['pick'] is None and k in (pygame.K_v, pygame.K_b)):
+            if k == pygame.K_ESCAPE or (pk['pick'] is None and k in (pygame.K_v, pygame.K_q, pygame.K_w)):
                 if pk['cancel']:
                     self.overlay = None
                 return
@@ -2712,8 +2745,8 @@ class Game:
         ks = self.pspr[0]
         s.blit(ks, (W // 2 - ks.get_width() // 2, 88))
         lines = ['CLICK OR DRAG A CARD ONTO A FOE. RIGHT CLICK CANCELS.',
-                 '1-9 PICK A CARD, A/D A TARGET, ENTER PLAYS, E ENDS THE TURN',
-                 'Z/X/C POTIONS    V DECK / DRAW PILE    B DISCARD PILE',
+                 'A/D PICK A CARD, E CHOOSES; THEN A/D PICK A FOE, E PLAYS',
+                 'SPACE END TURN  Q DRAW PILE  W DISCARD  Z/X/C POTIONS  V DECK',
                  'ESC PAUSE    F11 FULLSCREEN']
         for i, l in enumerate(lines):
             draw_text(s, l, W // 2, 146 + i * 9, 1, 'c', BONE)
@@ -2844,7 +2877,7 @@ class Game:
         tgt = None
         if targeting and alive:
             hov = self.enemy_at(self.mouse)
-            tgt = hov if hov else alive[self.tsel % len(alive)]
+            tgt = alive[self.tsel % len(alive)] if self.aiming or not hov else hov
         # enemies
         for e in self.enemies:
             if e.dead and e.die_t <= 0:
@@ -2893,7 +2926,7 @@ class Game:
             draw_text(s, str(n), r.centerx, r.y + 6, 1, 'c', BONE)
             draw_text(s, lab, r.centerx, r.y + 15, 1, 'c', BONE)
             if r.collidepoint(self.mouse):
-                tips.append(('DRAW PILE (V)' if lab == 'DRAW' else 'DISCARD PILE (B)') + f': {n} CARDS. CLICK TO VIEW.')
+                tips.append(('DRAW PILE (Q)' if lab == 'DRAW' else 'DISCARD PILE (W)') + f': {n} CARDS. CLICK TO VIEW.')
         if self.exh:
             draw_text(s, f'EXHAUST {len(self.exh)}', 398, 188, 1, 'r', BONE)
         er = self.end_rect()
@@ -2902,13 +2935,15 @@ class Game:
             self.draw_panel(er, BLOOD if hot else BLACK)
             draw_text(s, 'END TURN', er.centerx, er.y + 5, 1, 'c', BONE, False)
             if hot:
-                tips.append('END YOUR TURN (E).')
+                tips.append('END YOUR TURN (SPACE).')
         else:
             label = {'enemy': 'ENEMY TURN', 'victory': 'VICTORY', 'defeat': 'DEFEAT'}[self.phase]
             draw_text(s, label, er.right, er.y + 5, 1, 'r', BLOOD)
-        if self.turn == 1 and self.phase == 'player' and t % 60 < 40 and self.fights <= 1 and not self.elite \
+        if self.phase == 'player' and (self.aiming or self.potsel is not None):
+            draw_text(s, 'A/D PICK A FOE    E PLAYS    ESC BACK', W // 2, 18, 1, 'c', BLOOD)
+        elif self.turn == 1 and self.phase == 'player' and t % 60 < 40 and self.fights <= 1 and not self.elite \
                 and self.act == 0:
-            draw_text(s, 'DRAG A CARD ONTO A FOE, OR PRESS ITS NUMBER THEN ENTER', W // 2, 18, 1, 'c', BONE)
+            draw_text(s, 'DRAG A CARD ONTO A FOE, OR A/D TO PICK A CARD AND E TO PLAY', W // 2, 18, 1, 'c', BONE)
         # hand
         hov = self.hand_hover()
         layout = self.hand_layout()

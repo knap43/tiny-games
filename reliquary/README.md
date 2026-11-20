@@ -11,7 +11,7 @@ python reliquary.py --windowed
 
 **Controls:**
 - **Mouse:** drag a card onto a foe, or anywhere above the hand for untargeted cards. You can also click a card, then click its target. Right click cancels.
-- **Keys:** 1-9 and 0 pick a card, A/D or the arrows pick a target, Enter or Space plays it (pressing its number again works too). E ends the turn, Z/X/C drink a potion, V views the deck (in combat, the draw pile) and B the discard pile.
+- **Keys:** A/D (or the arrows, or 1-9 and 0) move through your hand and E chooses a card. If it needs a target and there are several foes, A/D then move through the foes and E plays it; Esc steps back. Space ends the turn, Q and W show the draw and discard piles, Z/X/C drink a potion, and V views your deck outside combat.
 - Menus: A/D and Enter, or click. Esc pauses or cancels, F11 toggles fullscreen.
 
 **The map:** foes, elites (harder, and they guard a relic), fires (rest to heal 30%, or hone a card to upgrade it), the bone merchant (cards, relics, potions, card removal), chests, and unknown rooms holding events with choices.
