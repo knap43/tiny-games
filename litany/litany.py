@@ -262,7 +262,7 @@ class Game:
         w = self.wave
         lo = min(7, 3 + w // 4)
         hi = min(12, 4 + w // 2)
-        n = 5 + w * 2
+        n = 9 + w * 3
         self.queue = [('shade', (lo, hi)) for _ in range(n)]
         if w >= 2:
             for _ in range(1 + (w >= 8)):
@@ -275,7 +275,8 @@ class Game:
             self.banner = f'WAVE {w}'
             self.sfx.play('toll')
         self.banner_t = 120
-        self.spawn_t = 90
+        self.spawn_t = 50
+        self.opening = 3          # the first few arrive in quick succession
 
     def pick_word(self, lo, hi):
         used = {s.word[0] for s in self.shades if not s.dead}
@@ -379,10 +380,14 @@ class Game:
         if self.queue:
             self.spawn_t -= 1
             alive = sum(1 for s in self.shades if not s.dead)
-            if self.spawn_t <= 0 and alive < 4 + self.wave:
+            if self.spawn_t <= 0 and alive < 6 + self.wave:
                 kind, rng = self.queue.pop(0)
                 self.spawn(kind, rng)
-                self.spawn_t = max(40, 160 - self.wave * 10) + random.randint(-15, 15)
+                if self.opening > 0:
+                    self.opening -= 1
+                    self.spawn_t = 12
+                else:
+                    self.spawn_t = max(30, 100 - self.wave * 7) + random.randint(-12, 12)
         elif not any(not s.dead for s in self.shades):
             self.wave_gap += 1
             if self.wave_gap > 80:
