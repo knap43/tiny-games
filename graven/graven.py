@@ -827,6 +827,7 @@ class Game:
         p.vials = min(p.maxvials, p.vials + 1) if n > 1 else p.vials
         self.enemies, self.bullets, self.pickups, self.waves = [], [], [], []
         self.particles, self.effects, self.texts = [], [], []
+        self.dmgnums = []  # floating damage numbers: [x, y, vx, vy, text, life, color]
         self.stairs = None
         self.boss = None
         self.frame = 0
@@ -1043,10 +1044,12 @@ class Game:
                     and self.reachable(e.x, e.y, e.r):
                 p.swing_hit.add(rid(e))
                 dmg = m['dmg'] * p.mdmg * (2 if p.finisher else 1)
+                crit = p.finisher
                 if self.perk('spear') and d > rng * 0.6:
                     dmg *= 2
+                    crit = True
                     self.burst(e.x, e.y, 6, 2.5, 14, color=BLOOD, glow=True)
-                self.hurt_enemy(e, dmg, c * m['kb'], s * m['kb'])
+                self.hurt_enemy(e, dmg, c * m['kb'], s * m['kb'], crit)
                 self.level.bleed(e.x, e.y, 6)
                 hit = True
         self.striking = False
@@ -1218,9 +1221,10 @@ class Game:
     def enemy_shot(self, e, a, spd, dmg=2, kind='ebolt', r=3):
         self.bullets.append(Bullet(e.x, e.y, a, spd, dmg, kind, True, 260, r))
 
-    def hurt_enemy(self, e, dmg, kx=0.0, ky=0.0):
+    def hurt_enemy(self, e, dmg, kx=0.0, ky=0.0, crit=False):
         if e.dead or e.hidden:
             return
+        hx, hy = e.x, e.y - e.r - 3
         if e.kind == 'wyrmseg':          # the body is one creature: hits land on the head
             e.flash = 5
             self.burst(e.x, e.y, 4, 1.8, 14, color=BLOOD)
@@ -1228,6 +1232,8 @@ class Game:
             if e.dead:
                 return
         e.hp -= dmg
+        self.dmgnums.append([hx + random.uniform(-3, 3), hy, random.uniform(-0.25, 0.25),
+                             -1.1, str(max(1, round(dmg))), 40, BLOOD if crit else BONE])
         e.flash = 5
         e.alert = True
         kb = 0.1 if e.kind in BIG else (0.5 if e.kind == 'revenant' else 1.2)
@@ -1996,6 +2002,12 @@ class Game:
             t[1] -= 0.3
             t[3] -= 1
         self.texts = [t for t in self.texts if t[3] > 0]
+        for t in self.dmgnums:   # pop up, then drift and settle
+            t[0] += t[2]
+            t[1] += t[3]
+            t[3] = min(t[3] + 0.08, 0.0)
+            t[5] -= 1
+        self.dmgnums = [t for t in self.dmgnums if t[5] > 0][-60:]
         if self.frame % 4 == 0:  # brazier embers
             for bx, by in self.level.braziers:
                 if abs(bx - self.player.x) < W and abs(by - self.player.y) < H:
@@ -2327,6 +2339,9 @@ class Game:
                 draw_text(s, 'E: ' + k.data, int(k.x - ox), y0, align='c')
                 for i, line in enumerate(lines):
                     draw_text(s, line, int(k.x - ox), y0 + 7 * (i + 1), align='c', color=BLOOD)
+        for x, y, _, _, txt, life, col in self.dmgnums:
+            if life > 8 or fr % 2:
+                draw_text(s, txt, int(x - ox), int(y - oy), align='c', color=col)
         for x, y, txt, life, col in self.texts:
             if life > 10 or fr % 2:
                 draw_text(s, txt, int(x - ox), int(y - oy), align='c', color=col)
