@@ -10,5 +10,6 @@ Small single-file pygame games. Each runs with nothing but `pygame` (`pacman -S 
 | [LITANY](litany/) | `python litany/litany.py` | dark-fantasy typing game: banish the shades closing in from every side |
 | [CENOTAPH](cenotaph/) | `python cenotaph/cenotaph.py` | dark-fantasy turn-based tactical roguelike: every move is an attack |
 | [RELIQUARY](reliquary/) | `python reliquary/reliquary.py` | dark-fantasy roguelike deck builder: three acts, cards, relics |
+| [HOLLYHOCK](hollyhock/) | `python hollyhock/hollyhock.py` | cozy farming sim: four seasons, animals, buildings, villagers |
 
 All games start fullscreen; F11 toggles a window, and `--windowed` starts in one.
